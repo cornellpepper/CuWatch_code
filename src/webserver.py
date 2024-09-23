@@ -2,6 +2,7 @@ import network
 import socket
 import time
 from machine import Pin
+from machine import RTC
 import _thread
 
 # Configure the LED pin (optional)
@@ -11,6 +12,10 @@ led = Pin("LED", Pin.OUT)
 shared_variable = {'led_state': 0}
 # Lock to manage access to the shared variable
 lock = _thread.allocate_lock()
+
+# global time string
+rtc = RTC()
+timestring = rtc.datetime()
 
 # Function to connect to Wi-Fi
 def connect_wifi(ssid, password=None):
@@ -46,6 +51,7 @@ html = """<!DOCTYPE html>
         <button name="led" value="off" type="submit">Turn LED Off</button>
     </form>
     <p>Shared variable: {shared}</p>
+    <p>Time now: {timestring}</p>
     </body>
 </html>
 """
@@ -136,6 +142,7 @@ def main():
             print("LED is ON in the main thread")
         else:
             print("LED is OFF in the main thread")
+        timestring = rtc.datetime()
         
         # Example: Toggle LED every 2 seconds based on shared variable
         time.sleep(2)
