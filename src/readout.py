@@ -5,19 +5,6 @@ import machine
 import uos
 import sdcard
 
-import sys
-
-
-# exit handler that unmounts the sd card if it's mounted
-# does this make sense w/o an OS?
-def exit_handler():
-    try:
-        uos.umount("/sd")
-        print("SD card unmounted.")
-    except:
-        pass
-
-sys.exitfunc = exit_handler
 
 
 # Define SPI pins -- see schematic for Pepper V2 board
@@ -63,9 +50,9 @@ with open(filename, "w") as f:
             muon_count = muon_count + 1
 
             # Calculate elapsed time in milliseconds
-            elapsed_time = time.ticks_diff(end_time, start_time)
+            elapsed_time = (end_time - start_time) # what about wraparound
             # write to the SD card
-            f.write(muon_count, adc_value, elapsed_time)
+            f.write(f"{muon_count}, {adc_value}, {elapsed_time}\n")
 
             wait_counts = 0
             # wait to drop beneath reset threshold
