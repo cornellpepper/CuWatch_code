@@ -23,15 +23,19 @@ def init_wifi(ssid, password):
         wlan.connect(ssid, password)
     # Wait for Wi-Fi connection
     connection_timeout = 30
+    print('Waiting for Wi-Fi connection ...', end="")
+    cycle = [ '.  ', '.. ', '...']
+    i = 0
     while connection_timeout > 0:
-        print(wlan.status())
-        if wlan.status() >= 3:
+        if wlan.status() >= network.STAT_GOT_IP:
             break
         connection_timeout -= 1
-        print('Waiting for Wi-Fi connection...')
+        print(f"\b\b\b{cycle[i]}", end="")
+        i = (i + 1) % 3
         time.sleep(1)
+    print("\b\b\b   ")
     # Check if connection is successful
-    if wlan.status() != 3:
+    if wlan.status() != network.STAT_GOT_IP:
         print('Failed to connect to Wi-Fi')
         return False
     else:
@@ -66,7 +70,6 @@ def init_RTC():
     rtc.datetime(dttuple)
     return data['datetime']
 
-
 # Define SPI pins -- see schematic for Pepper V2 board
 def init_sdcard():
 # Define SPI pins -- see schematic for Pepper V2 board
@@ -82,23 +85,53 @@ def init_sdcard():
 
     # List the contents of the SD card
     print("Filesystem mounted at /sd")
-    print(uos.listdir("/sd"))
+
     return sd
 
 def unmount_sdcard():
     uos.umount("/sd")
     print("SD card unmounted.")
 
-def init_logging(filename):
-    """initialize logging with the specified filename"""
-    logging.basicConfig(filename=filename, 
-                        level=logging.INFO, 
-                        format='%(asctime)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger()
-    print(f"Logging to file {filename}")
+
+### logging
+class CustomFormatter(logging.Formatter):
+    def format(self, record):
+        # Get the current local time as a tuple
+        timestamp = time.localtime()
+        # Format the tuple into a human-readable string (YYYY-MM-DD HH:MM:SS)
+        time_str = '{}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}'.format(
+            timestamp[0], timestamp[1], timestamp[2],
+            timestamp[3], timestamp[4], timestamp[5]
+        )
+        # Format the final log message, combining the time with the original message
+        log_message = f"{time_str} - {record.levelname} - {record.name} - {record.message}"
+        return log_message
+
+def init_logging(log_file: str):
+    # Create a logger object
+    logger = logging.getLogger('pepper')
+    logger.setLevel(logging.DEBUG)  # Set the logging level to DEBUG or any level you prefer
+
+    # Create a file handler to log to the specified file
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.DEBUG)
+
+    # Create a stream handler to log to standard output
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.DEBUG)
+
+    # Use the custom formatter without 'asctime', injecting the time manually into the message
+    formatter = CustomFormatter('%(message)s - %(name)s - %(levelname)s')
+
+    # Set the formatter for both handlers
+    file_handler.setFormatter(formatter)
+    stream_handler.setFormatter(formatter)
+
+    # Add handlers to the logger
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+
     return logger
-
-
 def calibrate_average_rms(adc, n):
     """calibrate the threshold value by taking the average of n samples. Assumes no muons are present"""
     sum = 0
@@ -122,6 +155,17 @@ def usr_switch_pressed(pin):
     if pin.value() == 1:
         switch_pressed = True
 
+def led_on_oneshot(timer):
+    """Callback function to turn off the LED after 1 ms"""
+    led2.off()
+    timer.deinit()
+
+def turn_on_led_oneshot():
+    """Turn on the LED and set a timer to turn it off after 1 ms"""
+    led2.on()
+    timer = machine.Timer(-1)
+    timer.init(period=2, mode=machine.Timer.ONE_SHOT, callback=led_on_oneshot)
+
 ### end of function definitions
 
 
@@ -135,8 +179,6 @@ if (not init_wifi("RedRover", None) ):
 now = init_RTC()
 print(f"current time is {now}")
 
-sd = init_sdcard()
-
 # Set up ADC on Pin 26 (GP26)
 adc = ADC(Pin(26))  # Pin 26 is GP26, which is ADC0
 temp = ADC(Pin(27))
@@ -149,13 +191,18 @@ led2.value(0)
 
 # set up switch on pin 16
 usr_switch = Pin(16, Pin.IN, Pin.PULL_DOWN)
-print(f"switch state at start is {usr_switch.value()}")
 switch_pressed = False
 usr_switch.irq(trigger=Pin.IRQ_RISING, handler=usr_switch_pressed)
 
-
+threshold = 0
+reset_threshold = 0
 
 muon_count = 0
+
+run_start_time = time.ticks_ms()
+end_time = 0  
+
+sd = init_sdcard()
 
 # this try block allows us to close the file and unmount the sd card if we get an exception
 try:
@@ -167,26 +214,27 @@ try:
     hour = now[3]
     minute = now[4]
     suffix = f"{year}{month:02d}{day:02d}_{hour:02d}{minute:02d}"
-    # data file
-    filename = f"/sd/muon_data_{suffix}.csv"
     # log file
     logger = init_logging(f"/sd/log_{suffix}.txt")
 
     # calibrate the adc
-    print("calibrating")
+    print("Calibrating ...")
     led2.value(1)
     baseline, rms = calibrate_average_rms(adc, 250)
-    print(f"baseline is {baseline:.1f} pm {rms:.1f}")
+    logger.info(f"baseline {baseline:.1f} rms {rms:.1f}")
+    #print(f"baseline is {baseline:.1f} pm {rms:.1f}")
     #threshold = baseline + 3.2*rms
     threshold = baseline + 500
     reset_threshold = baseline +  50
-    print("Thresholds", threshold, reset_threshold)
+    #print("Thresholds", threshold, reset_threshold)
     logger.info(f"calibrated threshold {threshold} and reset threshold {reset_threshold}")
-    time.sleep(5)
     led2.value(0)
-    print(f"writing to {filename}")
+    time.sleep(5)
+    # data file
+    filename = f"/sd/muon_data_{suffix}.csv"
+    logger.info(f"writing to {filename}")
     with open(filename, "w") as f:
-        f.write("Muon Count, ADC Value, dt, time\n")
+        f.write("Muon Count, ADC, V, dt, t, t_wait\n")
         # Infinite loop to read and print ADC value
         # Get the current time in milliseconds
         start_time = time.ticks_ms()
@@ -196,42 +244,49 @@ try:
             adc_value = adc.read_u16()  # Read the ADC value (0 - 65535)
             #print(adc_value)
             if ( adc_value > threshold ) :
-                #voltage = adc_value * 3.3 / 65535  # Convert to voltage (assuming 3.3V reference)
                 # Get the current time in milliseconds again
                 end_time = time.ticks_ms()
                 muon_count = muon_count + 1
+                # print out when muon_count is a multiple of 10
+                if muon_count % 10 == 0:
+                    logger.info(f"muon count {muon_count}")
+                #led2.on()
 
                 # Calculate elapsed time in milliseconds
                 dt = time.ticks_diff(end_time,start_time) # what about wraparound
-                # write to the SD card
-                f.write(f"{muon_count}, {adc_value}, {dt}, {end_time}\n")
                 start_time = end_time
                 wait_counts = 0
-                print(adc_value, dt)
-                logger.info(f"muon count {muon_count}, adc value {adc_value}, dt {dt}, time {end_time}")
                 # wait to drop beneath reset threshold
-                time.sleep_ms(10)
+                time.sleep_us(10)
                 while ( adc.read_u16() > reset_threshold ):
                     wait_counts = wait_counts + 1
-                    time.sleep_ms(10)
+                    time.sleep_us(10)
                     if ( wait_counts > 1000 ):
-                        print("waited too long", adc.read_u16())
                         logger.warning(f"waited too long, adc value {adc.read_u16()}")
                         break
-                    #print(adc.read_u16())
-                print("wait counts", wait_counts)
-                logger.info(f"wait counts {wait_counts}")  
-                # sync the file
-                f.flush()
-            if usr_switch_pressed:
-                print("switch pressed, exiting")
+                # if wait_counts > 0:
+                #     print("wait counts", wait_counts)
+                # write to the SD card
+                turn_on_led_oneshot()
+                voltage = adc_value * (3.3 / 65535)  
+                f.write(f"{muon_count}, {adc_value}, {voltage}, {dt}, {end_time}, {wait_counts}\n")
+                #led2.off()
+            time.sleep_us(20)
+            if switch_pressed:
                 logger.info("switch pressed, exiting")
                 break
+except Exception as e:
+    print("exception", e)
+    logger.exception(f"exception {e}")
+    raise
 finally:
-    unmount_sdcard()
     print("muon count", muon_count)
     print(f"thresholds were {threshold} and {reset_threshold}")
-    print(f"ending time is {time.localtime()}")
     print(f"data written to {filename}")
-    logger.info(f"muon count {muon_count}, thresholds {threshold} and {reset_threshold}, ending time {time.localtime()}")
+    # calculate rate
+    elapsed_time = time.ticks_diff(end_time, run_start_time) / 1000.0
+    print(f"elapsed time {elapsed_time:.2f} seconds")
+    rate = muon_count / elapsed_time
+    logger.info(f"muon count {muon_count}, rate {rate:.2f} muons/sec")
     logging.shutdown()
+    unmount_sdcard()
