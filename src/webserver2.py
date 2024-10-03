@@ -156,6 +156,7 @@ async def main():
         print('Exiting program.')
         return
     # Set the RTC
+    print("setting RTC")
     now = init_RTC()
     print('Clock set to:', now)
 
@@ -167,8 +168,9 @@ async def main():
     
     while True:
         # Add other tasks that you might need to do in the loop
-        await asyncio.sleep(5)
-        print('This message will be printed every 5 seconds')
+        sleeptime = 30
+        await asyncio.sleep(sleeptime)
+        print(f'This message will be printed every {sleeptime} seconds')
         
 
 # Create an Event Loop

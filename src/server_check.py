@@ -3,9 +3,14 @@ import requests
 import time
 import os
 from datetime import datetime
+import sys
 
 # The URL of the server to check
-url = "http://example.com"  # Replace with your server's URL
+# Use the default URL unless one is passed in on the command line
+if len(sys.argv) > 1:
+    url = sys.argv[1]
+else:
+    url = "http://example.com"  # Replace with your server's URL
 
 # Interval between checks in seconds (60 seconds = 1 minute)
 check_interval = 60
@@ -74,6 +79,7 @@ def check_server():
         log_result("FAILURE", f"An error occurred: {e}")
 
 if __name__ == "__main__":
+    print(f"Monitoring server at: {url}")
     # Loop to continuously check the server every minute
     while True:
         print(f"Checking server status at {time.strftime('%Y-%m-%d %H:%M:%S')}...")
@@ -86,4 +92,3 @@ if __name__ == "__main__":
 
         # Wait for the specified interval before checking again
         time.sleep(check_interval)
-
