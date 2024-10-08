@@ -9,6 +9,9 @@ import urequests
 import ujson
 import sys
 import logging
+import gc
+
+import my_secrets
 
 
 # Init Wi-Fi Interface
@@ -24,14 +27,14 @@ def init_wifi(ssid, password):
     # Wait for Wi-Fi connection
     connection_timeout = 30
     print('Waiting for Wi-Fi connection ...', end="")
-    cycle = [ '.  ', '.. ', '...']
+    cycle = [ '   ', '.  ', '.. ', '...']
     i = 0
     while connection_timeout > 0:
         if wlan.status() >= network.STAT_GOT_IP:
             break
         connection_timeout -= 1
         print(f"\b\b\b{cycle[i]}", end="")
-        i = (i + 1) % 3
+        i = (i + 1) % 4
         time.sleep(1)
     print("\b\b\b   ")
     # Check if connection is successful
@@ -89,6 +92,7 @@ def init_sdcard():
     return sd
 
 def unmount_sdcard():
+    uos.sync()
     uos.umount("/sd")
     print("SD card unmounted.")
 
@@ -141,11 +145,11 @@ def calibrate_average_rms(adc, n):
         sum += value
         sum_squared += value ** 2
         led2.toggle()
-        time.sleep_ms(10) # wait 10 ms
+        time.sleep_ms(20) # wait 10 ms
     mean = sum / n
     variance = (sum_squared / n) - (mean ** 2)
     standard_deviation = variance ** 0.5
-    led2.value(1)
+    led2.value(0)
     return mean, standard_deviation
 
 
@@ -157,19 +161,21 @@ def usr_switch_pressed(pin):
 
 def led_on_oneshot(timer):
     """Callback function to turn off the LED after 1 ms"""
+    global led2
     led2.off()
     timer.deinit()
 
+timer = machine.Timer(-1)
+
 def turn_on_led_oneshot():
-    """Turn on the LED and set a timer to turn it off after 1 ms"""
+    """Turn on the LED and set a timer to turn it off after x ms"""
     led2.on()
-    timer = machine.Timer(-1)
     timer.init(period=2, mode=machine.Timer.ONE_SHOT, callback=led_on_oneshot)
 
 ### end of function definitions
 
 
-if (not init_wifi("RedRover", None) ):
+if (not init_wifi(my_secrets.SSID, my_secrets.PASS) ):
     print("Couldn't initialize wifi")
     while True:
         led2.toggle()
@@ -220,21 +226,26 @@ try:
     # calibrate the adc
     print("Calibrating ...")
     led2.value(1)
-    baseline, rms = calibrate_average_rms(adc, 250)
+    baseline, rms = calibrate_average_rms(adc, 500)
     logger.info(f"baseline {baseline:.1f} rms {rms:.1f}")
     #print(f"baseline is {baseline:.1f} pm {rms:.1f}")
     #threshold = baseline + 3.2*rms
-    threshold = baseline + 500
-    reset_threshold = baseline +  50
-    #print("Thresholds", threshold, reset_threshold)
+    #threshold = round(baseline + 3.*rms)
+    threshold = round(baseline + 200.)
+    reset_threshold = round(baseline + 50.)
     logger.info(f"calibrated threshold {threshold} and reset threshold {reset_threshold}")
     led2.value(0)
     time.sleep(5)
     # data file
     filename = f"/sd/muon_data_{suffix}.csv"
     logger.info(f"writing to {filename}")
-    with open(filename, "w") as f:
-        f.write("Muon Count, ADC, V, dt, t, t_wait\n")
+    with open(filename, "w", buffering=10240) as f:
+        f.write(f"baseline, {baseline:.1f}\n")
+        f.write(f"stddev, {rms:.1f}\n")
+        f.write(f"threshold, {threshold}\n")
+        f.write(f"reset_threshold, {reset_threshold}\n")
+
+        f.write("Muon Count, ADC, dt, t, t_wait\n")
         # Infinite loop to read and print ADC value
         # Get the current time in milliseconds
         start_time = time.ticks_ms()
@@ -248,29 +259,30 @@ try:
                 end_time = time.ticks_ms()
                 muon_count = muon_count + 1
                 # print out when muon_count is a multiple of 10
-                if muon_count % 10 == 0:
-                    logger.info(f"muon count {muon_count}")
-                #led2.on()
+                if muon_count % 50 == 0:
+                    led2.off()
+                    rate = 1000.*muon_count/time.ticks_diff(end_time, run_start_time)
+                    logger.info(f"#: {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free")
+                    #gc.collect()
+                led2.on()
 
+                wait_counts = 0
+                # wait to drop beneath reset threshold
+                time.sleep_us(3)
+                while ( adc.read_u16() > reset_threshold ):
+                    wait_counts = wait_counts + 1
+                    time.sleep_us(3)
+                    if ( wait_counts > 100 ):
+                        logger.warning(f"waited too long, adc value {adc.read_u16()}")
+                        break
+                    led1.toggle()
+                #turn_on_led_oneshot()
                 # Calculate elapsed time in milliseconds
                 dt = time.ticks_diff(end_time,start_time) # what about wraparound
                 start_time = end_time
-                wait_counts = 0
-                # wait to drop beneath reset threshold
-                time.sleep_us(10)
-                while ( adc.read_u16() > reset_threshold ):
-                    wait_counts = wait_counts + 1
-                    time.sleep_us(10)
-                    if ( wait_counts > 1000 ):
-                        logger.warning(f"waited too long, adc value {adc.read_u16()}")
-                        break
-                # if wait_counts > 0:
-                #     print("wait counts", wait_counts)
                 # write to the SD card
-                turn_on_led_oneshot()
-                voltage = adc_value * (3.3 / 65535)  
-                f.write(f"{muon_count}, {adc_value}, {voltage}, {dt}, {end_time}, {wait_counts}\n")
-                #led2.off()
+                f.write(f"{muon_count}, {adc_value}, {dt}, {end_time}, {wait_counts}\n")
+                led2.off()
             time.sleep_us(20)
             if switch_pressed:
                 logger.info("switch pressed, exiting")
