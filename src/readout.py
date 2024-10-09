@@ -1,5 +1,5 @@
 
-from machine import ADC, Pin, RTC
+from machine import ADC, Pin, RTC, WDT
 import network
 import time
 import machine
@@ -29,6 +29,8 @@ def init_wifi(ssid, password):
     print('Waiting for Wi-Fi connection ...', end="")
     cycle = [ '   ', '.  ', '.. ', '...']
     i = 0
+    led2.value(1)
+    led1.value(0)
     while connection_timeout > 0:
         if wlan.status() >= network.STAT_GOT_IP:
             break
@@ -36,6 +38,9 @@ def init_wifi(ssid, password):
         print(f"\b\b\b{cycle[i]}", end="")
         i = (i + 1) % 4
         time.sleep(1)
+        led1.toggle()
+        led2.toggle()
+    
     print("\b\b\b   ")
     # Check if connection is successful
     if wlan.status() != network.STAT_GOT_IP:
@@ -145,7 +150,7 @@ def calibrate_average_rms(adc, n):
         sum += value
         sum_squared += value ** 2
         led2.toggle()
-        time.sleep_ms(20) # wait 10 ms
+        time.sleep_ms(25) # wait 
     mean = sum / n
     variance = (sum_squared / n) - (mean ** 2)
     standard_deviation = variance ** 0.5
@@ -169,10 +174,20 @@ timer = machine.Timer(-1)
 
 def turn_on_led_oneshot():
     """Turn on the LED and set a timer to turn it off after x ms"""
+    global led2, timer
     led2.on()
     timer.init(period=2, mode=machine.Timer.ONE_SHOT, callback=led_on_oneshot)
 
 ### end of function definitions
+# setup LEDs
+led1 = Pin('LED', Pin.OUT)
+led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
+led1.value(0)
+led2.value(0)
+
+# reset cause
+reset_cause = machine.reset_cause()
+print("reset cause", reset_cause)
 
 
 if (not init_wifi(my_secrets.SSID, my_secrets.PASS) ):
@@ -187,13 +202,9 @@ print(f"current time is {now}")
 
 # Set up ADC on Pin 26 (GP26)
 adc = ADC(Pin(26))  # Pin 26 is GP26, which is ADC0
-temp = ADC(Pin(27))
+temperature_adc = ADC(Pin(27)) #local temperature sensor
+temperature_adc2 = ADC(4) #internal temperature sensor
 
-# setup LEDs
-led1 = Pin('LED', Pin.OUT)
-led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
-led1.value(0)
-led2.value(0)
 
 # set up switch on pin 16
 usr_switch = Pin(16, Pin.IN, Pin.PULL_DOWN)
@@ -207,6 +218,7 @@ muon_count = 0
 
 run_start_time = time.ticks_ms()
 end_time = 0  
+
 
 sd = init_sdcard()
 
@@ -239,19 +251,26 @@ try:
     # data file
     filename = f"/sd/muon_data_{suffix}.csv"
     logger.info(f"writing to {filename}")
+    # turn on the watchdog
+    #wdt = WDT(timeout=8_000)  # enable it with a timeout of 8 seconds
     with open(filename, "w", buffering=10240) as f:
         f.write(f"baseline, {baseline:.1f}\n")
         f.write(f"stddev, {rms:.1f}\n")
         f.write(f"threshold, {threshold}\n")
         f.write(f"reset_threshold, {reset_threshold}\n")
 
-        f.write("Muon Count, ADC, dt, t, t_wait\n")
+        f.write("Muon Count, ADC, ADCM, temperature_ADC, temperature_ADC2, dt, t, t_wait\n")
         # Infinite loop to read and print ADC value
         # Get the current time in milliseconds
         start_time = time.ticks_ms()
         end_time = start_time
+        iter = 0
         while True:
+            #wdt.feed()
             led1.toggle()
+            iter = iter + 1
+            if iter % 10_000 == 0:
+                logger.info(f"iter {iter}")
             adc_value = adc.read_u16()  # Read the ADC value (0 - 65535)
             #print(adc_value)
             if ( adc_value > threshold ) :
@@ -269,19 +288,25 @@ try:
                 wait_counts = 0
                 # wait to drop beneath reset threshold
                 time.sleep_us(3)
-                while ( adc.read_u16() > reset_threshold ):
+                adc_curr_val = adc.read_u16()
+                adc_max_val = adc_curr_val
+                while ( adc_curr_val > reset_threshold ):
                     wait_counts = wait_counts + 1
                     time.sleep_us(3)
                     if ( wait_counts > 100 ):
                         logger.warning(f"waited too long, adc value {adc.read_u16()}")
                         break
                     led1.toggle()
+                    adc_curr_val = adc.read_u16()
+                    adc_max_val = max(adc_max_val, adc_curr_val)
                 #turn_on_led_oneshot()
                 # Calculate elapsed time in milliseconds
                 dt = time.ticks_diff(end_time,start_time) # what about wraparound
+                temperature_adc_value = temperature_adc.read_u16()
+                temperature_adc_value2 = temperature_adc2.read_u16()
                 start_time = end_time
                 # write to the SD card
-                f.write(f"{muon_count}, {adc_value}, {dt}, {end_time}, {wait_counts}\n")
+                f.write(f"{muon_count}, {adc_value}, {adc_max_val}, {temperature_adc_value}, {temperature_adc_value2}, {dt}, {end_time}, {wait_counts}\n")
                 led2.off()
             time.sleep_us(20)
             if switch_pressed:
