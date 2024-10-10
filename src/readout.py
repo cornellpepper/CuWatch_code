@@ -269,8 +269,10 @@ try:
             #wdt.feed()
             led1.toggle()
             iter = iter + 1
-            if iter % 10_000 == 0:
+            if iter % 100_000 == 0:
                 logger.info(f"iter {iter}")
+                f.flush()
+                uos.sync()
             adc_value = adc.read_u16()  # Read the ADC value (0 - 65535)
             #print(adc_value)
             if ( adc_value > threshold ) :
@@ -285,16 +287,16 @@ try:
                     #gc.collect()
                 led2.on()
 
-                wait_counts = 0
+                wait_counts = 100
                 # wait to drop beneath reset threshold
-                time.sleep_us(3)
+                # time.sleep_us(3)
                 adc_curr_val = adc.read_u16()
                 adc_max_val = adc_curr_val
                 while ( adc_curr_val > reset_threshold ):
-                    wait_counts = wait_counts + 1
+                    wait_counts = wait_counts - 1
                     time.sleep_us(3)
-                    if ( wait_counts > 100 ):
-                        logger.warning(f"waited too long, adc value {adc.read_u16()}")
+                    if ( wait_counts == 0 ):
+                        logger.warning(f"waited too long, adc value {adc_curr_val}")
                         break
                     led1.toggle()
                     adc_curr_val = adc.read_u16()
@@ -308,7 +310,7 @@ try:
                 # write to the SD card
                 f.write(f"{muon_count}, {adc_value}, {adc_max_val}, {temperature_adc_value}, {temperature_adc_value2}, {dt}, {end_time}, {wait_counts}\n")
                 led2.off()
-            time.sleep_us(20)
+            #time.sleep_us(20)
             if switch_pressed:
                 logger.info("switch pressed, exiting")
                 break
