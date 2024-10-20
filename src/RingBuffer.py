@@ -1,3 +1,4 @@
+"""A ring buffer is a fixed-size buffer that overwrites the oldest values when full."""
 import array
 
 class RingBuffer:
