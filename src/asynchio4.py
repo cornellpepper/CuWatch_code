@@ -7,17 +7,15 @@ import io
 import uos as os
 import gc
 import urequests
-import ujson
-import json 
+import ujson as json
 
-import _thread
 import micropython
 from microdot import Microdot, Response
 import network
 import rp2 
 
 import my_secrets
-import RingBuffer 
+import RingBuffer
 
 
 shutdown_request = False
@@ -114,7 +112,7 @@ def init_RTC():
         if response.status_code != 200:
             print('Error getting time from the internet')
             return None
-        data = ujson.loads(response.text)
+        data = json.loads(response.text)
     finally:
         response.close()
     # put current time into RTC
@@ -159,6 +157,7 @@ SD_DIRECTORY = '/sd'
 @app.route('/', methods=['GET'])
 def index(request):
     html = """
+    <!doctype html>
     <html>
         <head>
             <title>CuWatch</title>
@@ -240,6 +239,8 @@ def index(request):
                             document.getElementById('rate').innerHTML = data.rate;
                             document.getElementById('muon_count').innerHTML = data.muon_count;
                             document.getElementById('iteration_count').innerHTML = data.iteration_count;
+                            document.getElementById('reset_threshold').innerHTML = data.reset_threshold;
+                            document.getElementById('threshold').innerHTML = data.threshold;
 
                             // Add new data point to the chart
                             const now = new Date();
@@ -258,13 +259,30 @@ def index(request):
                             saveGraphData(rateChart);
                         });
                 }
+                // Function to handle button click to invoke a method on the microcontroller
+                function invokeMicrocontrollerMethod() {
+                    fetch('/request-shutdown', { method: 'POST' })
+                        .then(response => response.json())
+                        .then(data => {
+                            console.log('Method invoked:', data);
+                        })
+                        .catch(error => {
+                            console.error('Error invoking method:', error);
+                        });
+                }
+
+
                 setInterval(fetchData, 30000);  // Update every 30 seconds
             </script>
         </head>
         <body class="bg-light">
             <div class="container">
                 <h1 class="my-4 text-center">CuWatch Status and Configuration</h1>
-                
+                <p id="time"></p>
+                <div class="btn-group" role="group" aria-label="Basic example">
+                    <button type="button" class="btn btn-primary" onclick="window.location.href='/download'">Download data files</button>
+                    <button type="button" class="btn btn-secondary" onclick="invokeMicrocontrollerMethod()">Stop Run</button>
+                </div>
                 <!-- Display global variables in a Bootstrap table -->
                 <table class="table table-striped table-bordered">
                     <thead class="thead-dark">
@@ -276,7 +294,7 @@ def index(request):
                     <tbody>
                         <tr>
                             <td>Rate (Hz)</td>
-                            <td id="rate">""" + str(rate) + """</td>
+                            <td id="rate">""" + "{:.1f}".format(rate) + """</td>
                         </tr>
                         <tr>
                             <td>Muon Count</td>
@@ -288,7 +306,11 @@ def index(request):
                         </tr>
                         <tr>
                             <td>Threshold (ADC counts)</td>
-                            <td>""" + str(threshold) + """</td>
+                            <td id="threshold">""" + str(threshold) + """</td>
+                        </tr>
+                        <tr>
+                            <td>Reset threshold (ADC counts)</td>
+                            <td id="reset_threshold">""" + str(reset_threshold) + """</td>
                         </tr>
                     </tbody>
                 </table>
@@ -305,10 +327,7 @@ def index(request):
                     </div>
                     <button type="submit" class="btn btn-primary btn-block">Submit</button>
                 </form>
-                <a href="/download">Download CSV Files</a>  <!-- Link to the CSV download page -->
 
-                <h3 class="my-4">Current Time (JavaScript):</h3>
-                <p>Time: <span id="time" class="font-weight-bold"></span></p>
             </div>
 
             <footer class="text-center mt-5">
@@ -325,9 +344,11 @@ def data(request):
     global rate, muon_count, iteration_count
     # Return the current rate, muon_count, and iteration_count as JSON
     return Response(body=json.dumps({
-        'rate': rate,
+        'rate': round(rate,1),
         'muon_count': muon_count,
-        'iteration_count': iteration_count
+        'iteration_count': iteration_count,
+        'threshold': threshold,
+        'reset_threshold': reset_threshold
     }), headers={'Content-Type': 'application/json'})
 
 # Route to handle form submissions and update the threshold
@@ -342,6 +363,13 @@ def submit(request):
         return Response.redirect('/')
     except ValueError:
         return 'Invalid input. Please enter a valid integer.', 400
+
+# Route to handle shutdown request
+@app.route('/request-shutdown', methods=['POST'])
+def request_shutdown(request):
+    global shutdown_request
+    shutdown_request = True
+    return {"status": "Shutdown request sent"}
 
 
 # Helper function to concatenate paths (since os.path.join is not available)
@@ -387,12 +415,13 @@ def download_page(request):
     print("in download_page: this much memory free after gc: ", gc.mem_free())
 
     # Generate HTML for displaying the list of files with download links
-    file_list_html = "<ul>"
+    file_list_html = '<ul class="list-group">'
     for file in files[::-1]: # reverse the list to show most recent first
-        file_list_html += f'<li><a href="/download_file?file={file}">{file}</a></li>'
+        file_list_html += f'<li class="list-group-item"><a href="/download_file?file={file}">{file}</a></li>'
     file_list_html += "</ul>"
 
     html = f"""
+    <!doctype html>
     <html>
         <head>
             <title>Download CSV Files</title>
@@ -401,6 +430,10 @@ def download_page(request):
         <body class="bg-light">
             <div class="container">
                 <h1 class="my-4 text-center">Download CSV Files</h1>
+                <div class="btn-group" role="group" aria-label="Basic example">
+                    <button type="button" class="btn btn-primary" onclick="window.location.href='/'">Return home</button>
+                </div>
+
                 <h3 class="my-4 text-center">Total number of files (showing {file_limit}): {filecount}</h3>
                 {file_list_html}
                 <a href="/">Back to Home</a>
@@ -426,17 +459,19 @@ def file_stream_generator(file_path, chunk_size=512):
 def download_file(request):
     file_name = request.args.get('file')
     file_path = join_path(SD_DIRECTORY, file_name)
-
     try:
         if os.stat(file_path) and file_name.endswith('.csv'):
-            # Stream the file content using the generator function
-            return Response(body=file_stream_generator(file_path), headers={
-                'Content-Type': 'text/csv',
-                'Content-Disposition': f'attachment; filename="{file_name}"'
-            })
+            # Check if the file has non-zero length
+            if os.stat(file_path)[6] > 0:  # `st_size` is the 7th element in the tuple (index 6)
+                # Stream the file content using the generator function
+                return Response(body=file_stream_generator(file_path), headers={
+                    'Content-Type': 'text/csv',
+                    'Content-Disposition': f'attachment; filename="{file_name}"'
+                })
+            else:
+                return Response('File is empty', 400)
     except OSError:
         return Response('File not found', 404)
-
 
 ##################################################################    
 # these variables are used for communication between web server
@@ -446,6 +481,8 @@ muon_count = 0
 iteration_count = 0
 rate = 0.
 waited = 0
+threshold = 0
+reset_threshold = 0
 ##################################################################
 
 ##################################################################
@@ -453,6 +490,14 @@ waited = 0
 print("wifi init....")
 if not init_wifi(my_secrets.SSID, my_secrets.PASS):
     print("Couldn't initialize wifi")
+    while True:
+        led1.toggle()
+        time.sleep(0.5)
+        led2.toggle()
+        time.sleep(0.1)
+        led2.toggle()
+        time.sleep(0.1)
+
     time.sleep(99)
 
 now = init_RTC()
@@ -505,26 +550,20 @@ async def main():
         led1.toggle()
         iteration_count += 1
         if iteration_count % 50_000 == 0:
-            #logger.info(f"iter {iteration_count}")
-            #rate = 1000.*muon_count/time.ticks_diff(end_time, run_start_time)
             rate = 1000./dts.calculate_average()
-            print("iter ", iteration_count, gc.mem_free(), rate)
+            print(f"iter {iteration_count}, # {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free")
+        if iteration_count % 1_000_000 == 0:
+            print("flush file, iter ", iteration_count, gc.mem_free())
+            f.flush()
+            os.sync()
             gc.collect()
-            #f.flush()
-            #os.sync()
+
         adc_value = readout()  # Read the ADC value (0 - 65535)
         #print(adc_value)
         if adc_value > threshold:
             # Get the current time in milliseconds again
             end_time = tmeas()
             muon_count += 1
-            # print out when muon_count is a multiple of 10
-            if muon_count % 50 == 0:
-                led2.off()
-                print(f"#: {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free")
-                #logger.info(f"#: {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free")
-                #gc.collect()
-            led2.on()
 
             wait_counts = 100
             # wait to drop beneath reset threshold
@@ -545,10 +584,11 @@ async def main():
             # write to the SD card
             f.write(f"{muon_count}, {adc_value}, {temperature_adc_value}, {dt}, {end_time}, {wait_counts}\n")
             led2.off()
-        await asyncio.sleep_ms(0)
+        await asyncio.sleep_ms(0) # this yields to the web server running in the other thread
         #machine.idle()
         if shutdown_request:
             print("tight loop shutdown")
+            raise KeyboardInterrupt
             break
 
     await server
