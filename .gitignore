@@ -163,3 +163,5 @@ cython_debug/
 .DS_Store
 src/typings
 src/my_secrets.py
+src/RingBuffer.mpy
+/.vscode
