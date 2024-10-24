@@ -1,4 +1,4 @@
-from machine import ADC, Pin, RTC, idle
+from machine import ADC, Pin, RTC
 import asyncio
 import machine
 import sdcard
@@ -274,15 +274,59 @@ def index(request):
 
                 setInterval(fetchData, 30000);  // Update every 30 seconds
             </script>
+            <style>
+                body {
+                    display: block;
+                }
+                .sidebar {
+                    width: 250px;
+                    height: 100vh;
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    background-color: #f8f9fa;
+                    padding-top: 20px;
+                }
+                .content {
+                    margin-left: 250px;
+                    padding: 20px;
+                    width: calc(100% - 250px);
+                }
+                footer {
+                    position: fixed;
+                    bottom: 0;
+                    width: 100%;
+                    background-color: #f8f9fa;
+                    padding: 10px 0;
+                }
+                #rateChart {
+                    width: 100%;  /* Make the canvas take the full width of its container */
+                    height: auto; /* Maintain the aspect ratio */
+                }
+            </style>
         </head>
         <body class="bg-light">
-            <div class="container">
-                <h1 class="my-4 text-center">CuWatch Status and Configuration</h1>
-                <p id="time"></p>
-                <div class="btn-group" role="group" aria-label="Basic example">
-                    <button type="button" class="btn btn-primary" onclick="window.location.href='/download'">Download data files</button>
-                    <button type="button" class="btn btn-secondary" onclick="invokeMicrocontrollerMethod()">Stop Run</button>
-                </div>
+            <div class="sidebar">
+                <h2 class="text-center">CuWatch</h2>
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/download">Download Data</a>
+                    </li>
+                    <li class="nav-item">
+                        <button class="btn btn-secondary" onclick="invokeMicrocontrollerMethod()">Stop Run</button>
+                    </li>
+                    <li class="nav-item">
+                        <input type="number" id="thresholdInput" class="form-control" placeholder="Enter new threshold">
+                        <button class="btn btn-primary mt-2" onclick="updateThreshold()">Update Threshold</button>
+                    </li>
+                </ul>
+                <p id="time" class="text-center mt-4"></p>
+            </div>
+            <div class="content">
+                    <h1 class="my-4 text-center">CuWatch Status and Configuration</h1>
                 <!-- Display global variables in a Bootstrap table -->
                 <table class="table table-striped table-bordered">
                     <thead class="thead-dark">
@@ -317,17 +361,8 @@ def index(request):
 
                 <!-- Chart.js graph for Rate vs Time -->
                 <h3 class="my-4 text-center">Rate vs Time</h3>
-                <canvas id="rateChart" width="400" height="200"></canvas>
+                <canvas id="rateChart"></canvas>
                 
-                <h3 class="my-4 text-center">Update Threshold Value</h3>
-                <form action="/submit" method="POST" class="mb-4" onsubmit="saveGraphData(rateChart)">
-                    <div class="form-group">
-                        <label for="threshold">Threshold (integer):</label>
-                        <input type="number" id="threshold" name="threshold" class="form-control" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-block">Submit</button>
-                </form>
-
             </div>
 
             <footer class="text-center mt-5">
@@ -430,7 +465,7 @@ def download_page(request):
         <body class="bg-light">
             <div class="container">
                 <h1 class="my-4 text-center">Download CSV Files</h1>
-                <div class="btn-group" role="group" aria-label="Basic example">
+                <div class="btn-group" role="group" aria-label="Navigation Link">
                     <button type="button" class="btn btn-primary" onclick="window.location.href='/'">Return home</button>
                 </div>
 
@@ -473,6 +508,13 @@ def download_file(request):
     except OSError:
         return Response('File not found', 404)
 
+def usr_switch_pressed(pin):
+    """interrupt handler for the user switch"""
+    global switch_pressed
+    if pin.value() == 1:
+        switch_pressed = True
+
+
 ##################################################################    
 # these variables are used for communication between web server
 # and readout thread
@@ -498,8 +540,6 @@ if not init_wifi(my_secrets.SSID, my_secrets.PASS):
         led2.toggle()
         time.sleep(0.1)
 
-    time.sleep(99)
-
 now = init_RTC()
 print(f"current time is {now}")
 
@@ -509,6 +549,13 @@ threshold = round(baseline + 200.)
 reset_threshold = round(baseline + 50.)
 print(f"baseline: {baseline}, threshold: {threshold}, reset_threshold: {reset_threshold}")
 
+
+# set up switch on pin 16
+usr_switch = Pin(16, Pin.IN, Pin.PULL_DOWN)
+switch_pressed = False
+usr_switch.irq(trigger=Pin.IRQ_RISING, handler=usr_switch_pressed)
+
+
 init_sdcard()
 
 f = init_file(baseline, rms, threshold, reset_threshold, now)
@@ -516,23 +563,22 @@ f = init_file(baseline, rms, threshold, reset_threshold, now)
 
 
 async def main():
-    global muon_count, iteration_count, rate, waited
+    global muon_count, iteration_count, rate, waited, switch_pressed
     server = asyncio.create_task(app.start_server(port=80, debug=True))
     #tight_loop(threshold, reset_threshold, f)
     print("tight loop started")
-    # while True:
-    #     time.sleep_us(1)
-    #     iteration_count += 1
-    #     pass
     led1 = Pin('LED', Pin.OUT)
+    l1t = led1.toggle
     led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
+    l2on = led2.on
+    l2off = led2.off
     adc = ADC(0)  # Pin 26 is GP26, which is ADC0
     readout = adc.read_u16
     temperature_adc = ADC(1) #l Pin 27 is GP27, which is ADC1
     #t_readout = temperature_adc.read_u16
 
     tmeas = time.ticks_ms
-
+    tusleep = time.sleep_us
     start_time = tmeas()
     end_time = start_time
     iteration_count = 0
@@ -547,7 +593,7 @@ async def main():
     dts = RingBuffer.RingBuffer(50)
     while True:
         #wdt.feed()
-        led1.toggle()
+        l1t()
         iteration_count += 1
         if iteration_count % 50_000 == 0:
             rate = 1000./dts.calculate_average()
@@ -557,14 +603,13 @@ async def main():
             f.flush()
             os.sync()
             gc.collect()
-
         adc_value = readout()  # Read the ADC value (0 - 65535)
         #print(adc_value)
         if adc_value > threshold:
+            l2on()
             # Get the current time in milliseconds again
             end_time = tmeas()
             muon_count += 1
-
             wait_counts = 100
             # wait to drop beneath reset threshold
             # time.sleep_us(3)
@@ -575,7 +620,6 @@ async def main():
                     waited += 1 
                     #logger.warning(f"waited too long, adc value {readout()}")
                     break
-                led1.toggle()
             # Calculate elapsed time in milliseconds
             dt = time.ticks_diff(end_time,start_time) # what about wraparound
             dts.append(dt)
@@ -583,30 +627,30 @@ async def main():
             start_time = end_time
             # write to the SD card
             f.write(f"{muon_count}, {adc_value}, {temperature_adc_value}, {dt}, {end_time}, {wait_counts}\n")
-            led2.off()
+            l2off()
         await asyncio.sleep_ms(0) # this yields to the web server running in the other thread
-        #machine.idle()
-        if shutdown_request:
+        if shutdown_request or switch_pressed:
             print("tight loop shutdown")
-            raise KeyboardInterrupt
             break
-
+    f.close()
     await server
 
+# start the web server and wait for exceptions to end it. 
 try: 
     asyncio.run(main())
 except KeyboardInterrupt:
     print("keyboard interrupt")
-    shutdown_request = True
-    time.sleep(1)
-    f.close()
+    try:
+        f.close()
+    except:
+        pass
     unmount_sdcard()
     print("done")
 except Exception as e:
     print("exception ", e)
-    shutdown_request = True
-    time.sleep(1)
-    f.close()
+    try:
+        f.close()
+    except:
+        pass
     unmount_sdcard()
     print("done")
-#app.run(debug=True, port=80)
