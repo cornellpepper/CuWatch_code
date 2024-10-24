@@ -205,6 +205,13 @@ def index(request):
                             }]
                         },
                         options: {
+                            responsive: true,  // Make the chart responsive
+                            maintainAspectRatio: true,  // Allow the chart to adjust its aspect ratio
+                            layout: {
+                                padding: {
+                                    bottom: 30  // Add padding to the bottom of the chart
+                                }
+                            },
                             scales: {
                                 x: {
                                     type: 'time',  // Use time scale
@@ -590,19 +597,26 @@ async def main():
     run_start_time = start_time
     temperature_adc_value = 0
 
+    INNER_ITER_LIMIT = const(400_000)
+    OUTER_ITER_LIMIT = const(20*INNER_ITER_LIMIT)
+
     dts = RingBuffer.RingBuffer(50)
+    loop_timer_time = tmeas()
     while True:
         #wdt.feed()
-        l1t()
         iteration_count += 1
-        if iteration_count % 50_000 == 0:
+        if iteration_count % INNER_ITER_LIMIT == 0:
             rate = 1000./dts.calculate_average()
-            print(f"iter {iteration_count}, # {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free")
-        if iteration_count % 1_000_000 == 0:
-            print("flush file, iter ", iteration_count, gc.mem_free())
-            f.flush()
-            os.sync()
-            gc.collect()
+            tdiff = time.ticks_diff(tmeas(), loop_timer_time)
+            avg_time = tdiff/INNER_ITER_LIMIT
+            print(f"iter {iteration_count}, # {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free, avg time {avg_time:.3f} ms")
+            l1t()
+            loop_timer_time = tmeas()
+            if iteration_count % OUTER_ITER_LIMIT == 0:
+                print("flush file, iter ", iteration_count, gc.mem_free())
+                f.flush()
+                os.sync()
+                gc.collect()
         adc_value = readout()  # Read the ADC value (0 - 65535)
         #print(adc_value)
         if adc_value > threshold:
@@ -615,7 +629,7 @@ async def main():
             # time.sleep_us(3)
             while readout() > reset_threshold:
                 wait_counts = wait_counts - 1
-                time.sleep_us(3)
+                tusleep(1)
                 if wait_counts == 0:
                     waited += 1 
                     #logger.warning(f"waited too long, adc value {readout()}")
@@ -628,12 +642,13 @@ async def main():
             # write to the SD card
             f.write(f"{muon_count}, {adc_value}, {temperature_adc_value}, {dt}, {end_time}, {wait_counts}\n")
             l2off()
-        await asyncio.sleep_ms(0) # this yields to the web server running in the other thread
+        if iteration_count % 1_000 == 0:
+            await asyncio.sleep_ms(0) # this yields to the web server running in the other thread
         if shutdown_request or switch_pressed:
-            print("tight loop shutdown")
+            print("tight loop shutdown, waited is ", waited)
             break
     f.close()
-    await server
+    #await server
 
 # start the web server and wait for exceptions to end it. 
 try: 
