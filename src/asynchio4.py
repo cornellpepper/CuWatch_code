@@ -142,7 +142,7 @@ def init_file(baseline, rms, threshold, reset_threshold, now) -> io.TextIOWrappe
     f = open(filename, "w", buffering=10240, encoding='utf-8')
     f.write("baseline, stddev, threshold, reset_threshold, run_start_time\n")
     f.write(f"{baseline:.1f}, {rms:.1f}, {threshold}, {reset_threshold}, {now}\n")
-    f.write("Muon Count,ADC,temperature_ADC,dt,t,t_wait\n")
+    f.write("Muon Count,ADC,temperature_ADC,dt,t,t_wait,coinc\n")
     return f
 
 
@@ -522,6 +522,14 @@ def usr_switch_pressed(pin):
         switch_pressed = True
 
 
+def check_leader_status():
+    """check if this node is the leader or not. If the file /sd/is_secondary exists, then this is a secondary node"""
+    try:
+        os.stat("/sd/is_secondary")
+        return False
+    except OSError:
+        return True
+
 ##################################################################    
 # these variables are used for communication between web server
 # and readout thread
@@ -532,6 +540,7 @@ rate = 0.
 waited = 0
 threshold = 0
 reset_threshold = 0
+leader_status = True
 ##################################################################
 
 ##################################################################
@@ -564,6 +573,13 @@ usr_switch.irq(trigger=Pin.IRQ_RISING, handler=usr_switch_pressed)
 
 
 init_sdcard()
+
+is_leader = check_leader_status()
+if is_leader:
+    pin22 = Pin(22, Pin.OUT)
+else:
+    pin22 = Pin(22, Pin.IN)
+
 
 f = init_file(baseline, rms, threshold, reset_threshold, now)
 
@@ -601,6 +617,7 @@ async def main():
     OUTER_ITER_LIMIT = const(20*INNER_ITER_LIMIT)
 
     dts = RingBuffer.RingBuffer(50)
+    coincidence = 0
     loop_timer_time = tmeas()
     while True:
         #wdt.feed()
@@ -625,6 +642,10 @@ async def main():
             end_time = tmeas()
             muon_count += 1
             wait_counts = 100
+            if is_leader:
+                pin22.value(1)
+            else:
+                coincidence = (pin22.value() == 1)
             # wait to drop beneath reset threshold
             # time.sleep_us(3)
             while readout() > reset_threshold:
@@ -640,7 +661,7 @@ async def main():
             temperature_adc_value = temperature_adc.read_u16()
             start_time = end_time
             # write to the SD card
-            f.write(f"{muon_count}, {adc_value}, {temperature_adc_value}, {dt}, {end_time}, {wait_counts}\n")
+            f.write(f"{muon_count}, {adc_value}, {temperature_adc_value}, {dt}, {end_time}, {wait_counts}, {coincidence}\n")
             l2off()
         if iteration_count % 1_000 == 0:
             await asyncio.sleep_ms(0) # this yields to the web server running in the other thread
