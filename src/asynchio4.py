@@ -583,9 +583,9 @@ init_sdcard()
 pin14 = None
 is_leader = check_leader_status()
 if is_leader:
-    pin14 = Pin(14, Pin.OUT)
-else:
     pin14 = Pin(14, Pin.IN)
+else:
+    pin14 = Pin(14, Pin.OUT)
 print("is_leader is ", is_leader)
 
 
@@ -660,6 +660,9 @@ async def main():
             while readout() > reset_threshold:
                 wait_counts = wait_counts - 1
                 tusleep(1)
+                if is_leader and coincidence == 0: # latch value of coincidence
+                    if pin14.value() == 1:
+                        coincidence = 1
                 if wait_counts == 0:
                     waited += 1 
                     #logger.warning(f"waited too long, adc value {readout()}")
