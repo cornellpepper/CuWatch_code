@@ -128,7 +128,7 @@ def init_RTC():
     rtc.datetime(dttuple)
     return data['datetime']
 
-def init_file(baseline, rms, threshold, reset_threshold, now) -> io.TextIOWrapper:
+def init_file(baseline, rms, threshold, reset_threshold, now, is_leader) -> io.TextIOWrapper:
     """ open file for writing, with date and time in the filename """
     now2 = time.localtime()
     year = now2[0]
@@ -140,8 +140,12 @@ def init_file(baseline, rms, threshold, reset_threshold, now) -> io.TextIOWrappe
     # data file
     filename = f"/sd/muon_data_{suffix}.csv"
     f = open(filename, "w", buffering=10240, encoding='utf-8')
-    f.write("baseline, stddev, threshold, reset_threshold, run_start_time\n")
-    f.write(f"{baseline:.1f}, {rms:.1f}, {threshold}, {reset_threshold}, {now}\n")
+    f.write("baseline,stddev,threshold,reset_threshold,run_start_time,is_leader\n")
+    if is_leader:
+        leader = 1
+    else:
+        leader = 0
+    f.write(f"{baseline:.1f}, {rms:.1f}, {threshold}, {reset_threshold}, {now}, {leader}\n")
     f.write("Muon Count,ADC,temperature_ADC,dt,t,t_wait,coinc\n")
     return f
 
@@ -571,17 +575,21 @@ usr_switch = Pin(16, Pin.IN, Pin.PULL_DOWN)
 switch_pressed = False
 usr_switch.irq(trigger=Pin.IRQ_RISING, handler=usr_switch_pressed)
 
+led1 = Pin('LED', Pin.OUT)
+led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
+
 
 init_sdcard()
-
+pin14 = None
 is_leader = check_leader_status()
 if is_leader:
-    pin22 = Pin(22, Pin.OUT)
+    pin14 = Pin(14, Pin.OUT)
 else:
-    pin22 = Pin(22, Pin.IN)
+    pin14 = Pin(14, Pin.IN)
+print("is_leader is ", is_leader)
 
 
-f = init_file(baseline, rms, threshold, reset_threshold, now)
+f = init_file(baseline, rms, threshold, reset_threshold, now, is_leader)
 
 
 
@@ -590,9 +598,7 @@ async def main():
     server = asyncio.create_task(app.start_server(port=80, debug=True))
     #tight_loop(threshold, reset_threshold, f)
     print("tight loop started")
-    led1 = Pin('LED', Pin.OUT)
     l1t = led1.toggle
-    led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
     l2on = led2.on
     l2off = led2.off
     adc = ADC(0)  # Pin 26 is GP26, which is ADC0
@@ -642,10 +648,13 @@ async def main():
             end_time = tmeas()
             muon_count += 1
             wait_counts = 100
-            if is_leader:
-                pin22.value(1)
+            if not is_leader:
+                pin14.value(1)
             else:
-                coincidence = (pin22.value() == 1)
+                if pin14.value() == 1:
+                    coincidence = 1
+                else:
+                    coincidence = 0
             # wait to drop beneath reset threshold
             # time.sleep_us(3)
             while readout() > reset_threshold:
@@ -663,6 +672,8 @@ async def main():
             # write to the SD card
             f.write(f"{muon_count}, {adc_value}, {temperature_adc_value}, {dt}, {end_time}, {wait_counts}, {coincidence}\n")
             l2off()
+            if not is_leader:
+                pin14.value(0)
         if iteration_count % 1_000 == 0:
             await asyncio.sleep_ms(0) # this yields to the web server running in the other thread
         if shutdown_request or switch_pressed:
