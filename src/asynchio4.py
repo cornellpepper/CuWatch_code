@@ -549,6 +549,19 @@ leader_status = True
 
 ##################################################################
 
+### SET UP GPIO PINS
+# set up switch on pin 16
+usr_switch = Pin(16, Pin.IN, Pin.PULL_DOWN)
+switch_pressed = False
+usr_switch.irq(trigger=Pin.IRQ_RISING, handler=usr_switch_pressed)
+
+# I think these need to set up the pins, too
+adc = ADC(Pin(26))       # create ADC object on ADC pin
+adc_temp = ADC(Pin(27))  # create ADC object on ADC pin
+
+led1 = Pin('LED', Pin.OUT)
+led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
+
 print("wifi init....")
 if not init_wifi(my_secrets.SSID, my_secrets.PASS):
     print("Couldn't initialize wifi")
@@ -565,18 +578,13 @@ print(f"current time is {now}")
 
 baseline, rms = calibrate_average_rms(500)
 
-threshold = round(baseline + 200.)
+# 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts is 50 mV above threshold
+# the signal in Sally is about 0.5V.  
+threshold = const(int(round(baseline + 1000.)))
 reset_threshold = round(baseline + 50.)
 print(f"baseline: {baseline}, threshold: {threshold}, reset_threshold: {reset_threshold}")
 
 
-# set up switch on pin 16
-usr_switch = Pin(16, Pin.IN, Pin.PULL_DOWN)
-switch_pressed = False
-usr_switch.irq(trigger=Pin.IRQ_RISING, handler=usr_switch_pressed)
-
-led1 = Pin('LED', Pin.OUT)
-led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
 
 
 init_sdcard()
