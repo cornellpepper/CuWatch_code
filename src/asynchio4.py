@@ -281,6 +281,35 @@ def index(request):
                             console.error('Error invoking method:', error);
                         });
                 }
+                function updateThreshold() {
+                    // Retrieve the new threshold value from the input field
+                    const newThreshold = document.getElementById('thresholdInput').value;
+
+                    // Validate the input
+                    if (newThreshold === '') {
+                        alert('Please enter a valid threshold.');
+                        return;
+                    }
+
+                    // Create an XMLHttpRequest object
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/submit', true);
+                    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+
+                    // Define a callback function to handle the server's response
+                    xhr.onreadystatechange = function() {
+                        if (xhr.readyState === XMLHttpRequest.DONE) {
+                            if (xhr.status === 200) {
+                                alert('Threshold updated successfully!');
+                            } else {
+                                alert('Failed to update threshold.');
+                            }
+                        }
+                    };
+
+                    // Send the request with the threshold data
+                    xhr.send('threshold=' + encodeURIComponent(newThreshold));
+                }
 
 
                 setInterval(fetchData, 30000);  // Update every 30 seconds
