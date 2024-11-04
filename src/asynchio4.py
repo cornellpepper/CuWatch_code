@@ -38,8 +38,8 @@ def init_wifi(ssid, password):
     print('Waiting for Wi-Fi connection ...', end="")
     cycle = [ '   ', '.  ', '.. ', '...']
     i = 0
-    #led2.value(1)
-    #led1.value(0)
+    led2.value(1)
+    led1.value(0)
     while connection_timeout > 0:
         if wlan.status() >= network.STAT_GOT_IP:
             break
@@ -47,8 +47,8 @@ def init_wifi(ssid, password):
         print(f"\b\b\b{cycle[i]}", end="")
         i = (i + 1) % 4
         time.sleep(1)
-        #led1.toggle()
-        #led2.toggle()
+        led1.toggle()
+        led2.toggle()
     
     print("\b\b\b   ")
     # Check if connection is successful
@@ -110,7 +110,7 @@ def init_RTC():
     response = urequests.get(url)
     try:
         if response.status_code != 200:
-            print('Error getting time from the internet')
+            print(f'Error getting time from the internet: {response.status_code}')
             return None
         data = json.loads(response.text)
     finally:
@@ -300,7 +300,7 @@ def index(request):
                     xhr.onreadystatechange = function() {
                         if (xhr.readyState === XMLHttpRequest.DONE) {
                             if (xhr.status === 200) {
-                                alert('Threshold updated successfully!');
+                                console.log('Threshold updated successfully!');
                             } else {
                                 alert('Failed to update threshold.');
                             }
@@ -487,7 +487,6 @@ def download_page(request):
         files = []  # Handle case where SD card is not mounted or directory doesn't exist
     # 
     gc.collect()
-    print("in download_page: this much memory free after gc: ", gc.mem_free())
 
     # Generate HTML for displaying the list of files with download links
     file_list_html = '<ul class="list-group">'
@@ -501,6 +500,7 @@ def download_page(request):
         <head>
             <title>Download CSV Files</title>
             <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+            <link rel="stylesheet" href="/styles.css">
         </head>
         <body class="bg-light">
             <div class="container">
@@ -548,6 +548,62 @@ def download_file(request):
     except OSError:
         return Response('File not found', 404)
 
+@app.route('/technical')
+def technical_page(request):
+    html = f"""
+    <!doctype html>
+    <html>
+        <head>
+            <title>CuWatch Technical Information
+            </title>
+            <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+            <link rel="stylesheet" href="/styles.css">
+        </head>
+        <body class="bg-light">
+            <div class="container">
+            <h1 class="my-4 text-center">CuWatch Technical Information</h1>
+            <table class="table table-striped table-bordered">
+                <thead class="thead-dark">
+                <tr>
+                    <th>Parameter</th>
+                    <th>Value</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr>
+                    <td>Loop time (ms) </td>
+                    <td>{avg_time}</td>
+                </tr>
+                <tr>
+                    <td>Waited</td>
+                    <td>{waited}</td>
+                </tr>
+                <tr>
+                    <td>Leader</td>
+                    <td>{is_leader}</td>
+                </tr>
+                <tr>
+                    <td>Parameter 4</td>
+                    <td>Value 4</td>
+                </tr>
+                </tbody>
+            </table>
+            <a href="/">Back to Home</a>
+            </div>
+        </body>
+    </html>
+    """
+    return Response(body=html, headers={'Content-Type': 'text/html'})
+
+@app.route('/styles.css')
+def stylesheet(request):
+    try:
+        with open('styles.css', 'r') as f:
+            css_content = f.read()
+        return Response(body=css_content, headers={'Content-Type': 'text/css'})
+    except OSError:
+        return Response('/* Stylesheet not found */', headers={'Content-Type': 'text/css'})
+
 def usr_switch_pressed(pin):
     """interrupt handler for the user switch"""
     global switch_pressed
@@ -573,7 +629,8 @@ rate = 0.
 waited = 0
 threshold = 0
 reset_threshold = 0
-leader_status = True
+is_leader = True
+avg_time = 0.
 ##################################################################
 
 ##################################################################
@@ -609,7 +666,7 @@ baseline, rms = calibrate_average_rms(500)
 
 # 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts is 50 mV above threshold
 # the signal in Sally is about 0.5V.  
-threshold = const(int(round(baseline + 1000.)))
+threshold = int(round(baseline + 1000.))
 reset_threshold = round(baseline + 50.)
 print(f"baseline: {baseline}, threshold: {threshold}, reset_threshold: {reset_threshold}")
 
@@ -617,12 +674,13 @@ print(f"baseline: {baseline}, threshold: {threshold}, reset_threshold: {reset_th
 
 
 init_sdcard()
-pin14 = None
+
+coincidence_pin = None
 is_leader = check_leader_status()
 if is_leader:
-    pin14 = Pin(14, Pin.IN)
+    coincidence_pin = Pin(14, Pin.IN)
 else:
-    pin14 = Pin(14, Pin.OUT)
+    coincidence_pin = Pin(14, Pin.OUT)
 print("is_leader is ", is_leader)
 
 
@@ -631,7 +689,7 @@ f = init_file(baseline, rms, threshold, reset_threshold, now, is_leader)
 
 
 async def main():
-    global muon_count, iteration_count, rate, waited, switch_pressed
+    global muon_count, iteration_count, rate, waited, switch_pressed, avg_time
     server = asyncio.create_task(app.start_server(port=80, debug=True))
     #tight_loop(threshold, reset_threshold, f)
     print("tight loop started")
@@ -684,11 +742,11 @@ async def main():
             # Get the current time in milliseconds again
             end_time = tmeas()
             muon_count += 1
-            wait_counts = 100
+            wait_counts = 150
             if not is_leader:
-                pin14.value(1)
+                coincidence_pin.value(1)
             else:
-                if pin14.value() == 1:
+                if coincidence_pin.value() == 1:
                     coincidence = 1
                 else:
                     coincidence = 0
@@ -698,7 +756,7 @@ async def main():
                 wait_counts = wait_counts - 1
                 tusleep(1)
                 if is_leader and coincidence == 0: # latch value of coincidence
-                    if pin14.value() == 1:
+                    if coincidence_pin.value() == 1:
                         coincidence = 1
                 if wait_counts == 0:
                     waited += 1 
@@ -713,7 +771,7 @@ async def main():
             f.write(f"{muon_count}, {adc_value}, {temperature_adc_value}, {dt}, {end_time}, {wait_counts}, {coincidence}\n")
             l2off()
             if not is_leader:
-                pin14.value(0)
+                coincidence_pin.value(0)
         if iteration_count % 1_000 == 0:
             await asyncio.sleep_ms(0) # this yields to the web server running in the other thread
         if shutdown_request or switch_pressed:
