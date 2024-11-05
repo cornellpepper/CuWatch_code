@@ -16,7 +16,7 @@ Then install the packages required.
 mpremote mip install sdcard logger 
 ```
 
-## Program flow as of 11/5/2024e
+## Program flow as of 11/5/2024
 When the code starts, the first thing that happens is that the Pico tries to connect to the wifi. If the LEDs start blinking in a 2:1 pattern, that means that connection to wifi was unsuccessful. Probably the `my_secrets.py` file needs to be updated on the pico for the local network.
 
 After connecting to WIFI, the board tries to get the current time by querying a remote web page (http://worldtimeapi.org). This is used to set the time stamp for the data collection.
@@ -45,6 +45,12 @@ SSID=RedRover
 
     5. Run via `mpremote run asynchio4.py` from the terminal.
 
+### Automatic startup
+To have the web page and readout run by default, the python file needs to be copied to the pico as `main.py`:
+```shell
+mpremote fs cp asynchio4.py :main.py
+```
+Micropython automatically runs the file called `main.py` when it starts. 
 
 ## Files as of 2024-10-01
 
