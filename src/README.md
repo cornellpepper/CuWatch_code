@@ -17,11 +17,11 @@ mpremote mip install sdcard logger
 ```
 
 ## Newer files that are of interest (10/21/2024)
-- readout.py: readout w/o web server
-- asynchio4.py: current version that uses `asynchio` and [microdot](https://microdot.readthedocs.io/en/latest) for web services, and also provides the readout.
+- readout.py: readout w/o web server. Obsolete.
+- asynchio4.py: current version that uses `asyncio` and [microdot](https://microdot.readthedocs.io/en/latest) for web services, and also provides the readout.
     - this requires you to install the following files
     1. `microdot.py` and `__init__.py` from the microdot repo. Pre-compile using mpy-cross to generate `mpy` file and install that to save memory.
-    2. `mpy-cross microdot.py; mpremote fs cp microdot.mpy :`; same for `__init.py`
+    2. `mpy-cross microdot.py; mpremote fs cp microdot.mpy :`; same for `__init__.py`
     3. `RingBuffer.py` from the local repo, install via `mpremote fs cp RingBuffer.py :`
     4. Create and install `my_secrets.py` which must look like this e.g., for RedRover
 ```
