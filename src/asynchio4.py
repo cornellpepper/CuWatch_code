@@ -9,7 +9,7 @@ import gc
 import urequests
 import ujson as json
 
-import micropython
+from micropython import const
 from microdot import Microdot, Response
 import network
 import rp2 
@@ -107,26 +107,33 @@ def init_RTC():
     """set date and time in RTC. Assumes we are on the network."""
     # Get the date and time for the public IP address our node is associated with
     url = 'http://worldtimeapi.org/api/ip'
-    response = urequests.get(url)
-    try:
-        if response.status_code != 200:
-            print(f'Error getting time from the internet: {response.status_code}')
-            return None
-        data = json.loads(response.text)
-    finally:
-        response.close()
+    max_retries = const(3)
+    for _ in range(max_retries):
+        response = urequests.get(url)
+        try:
+            if response.status_code == 200:
+                rtc_time_data = json.loads(response.text)
+                break
+            else:
+                print(f'Error getting time from the internet: {response.status_code}')
+        finally:
+            response.close()
+        time.sleep(1)  # Wait for 1 second before retrying
+    else:
+        print('Failed to get time from the internet after 3 attempts')
+        return None
     # put current time into RTC
-    dttuple = (int(data['datetime'][0:4]), # year
-                int(data['datetime'][5:7]), # month
-                int(data['datetime'][8:10]), # day
-                int(data['day_of_week']), # day of week
-                int(data['datetime'][11:13]), # hour
-                int(data['datetime'][14:16]), # minute
-                int(data['datetime'][17:19]), # second
+    dttuple = (int(rtc_time_data['datetime'][0:4]), # year
+                int(rtc_time_data['datetime'][5:7]), # month
+                int(rtc_time_data['datetime'][8:10]), # day
+                int(rtc_time_data['day_of_week']), # day of week
+                int(rtc_time_data['datetime'][11:13]), # hour
+                int(rtc_time_data['datetime'][14:16]), # minute
+                int(rtc_time_data['datetime'][17:19]), # second
                 0) # subsecond, not set here
     rtc = RTC()
     rtc.datetime(dttuple)
-    return data['datetime']
+    return rtc_time_data['datetime']
 
 def init_file(baseline, rms, threshold, reset_threshold, now, is_leader) -> io.TextIOWrapper:
     """ open file for writing, with date and time in the filename """
@@ -416,8 +423,7 @@ def index(request):
 # API route to return dynamic data (rate, muon_count, iteration_count)
 @app.route('/data', methods=['GET'])
 def data(request):
-    global rate, muon_count, iteration_count
-    # Return the current rate, muon_count, and iteration_count as JSON
+    """Return the current rate, muon_count, and iteration_count as JSON"""
     return Response(body=json.dumps({
         'rate': round(rate,1),
         'muon_count': muon_count,
@@ -664,8 +670,8 @@ print(f"current time is {now}")
 
 baseline, rms = calibrate_average_rms(500)
 
-# 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts is 50 mV above threshold
-# the signal in Sally is about 0.5V.  
+# 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts
+# is 50 mV above threshold. the signal in Sally is about 0.5V.
 threshold = int(round(baseline + 1000.))
 reset_threshold = round(baseline + 50.)
 print(f"baseline: {baseline}, threshold: {threshold}, reset_threshold: {reset_threshold}")
