@@ -21,45 +21,6 @@ import RingBuffer
 shutdown_request = False
 app = Microdot()
 
-# Init Wi-Fi Interface
-def init_wifi(ssid, password):
-    """connect to the designated wifi network"""
-    wlan = network.WLAN(network.STA_IF)
-    wlan.config(pm = 0xa11140 ) # set to no sleep mode
-    rp2.country("US") # set country code
-    wlan.active(True)
-    # Connect to your network
-    if password is None:
-        wlan.connect(ssid)
-    else:
-        wlan.connect(ssid, password)
-    # Wait for Wi-Fi connection
-    connection_timeout = 30
-    print('Waiting for Wi-Fi connection ...', end="")
-    cycle = [ '   ', '.  ', '.. ', '...']
-    i = 0
-    led2.value(1)
-    led1.value(0)
-    while connection_timeout > 0:
-        if wlan.status() >= network.STAT_GOT_IP:
-            break
-        connection_timeout -= 1
-        print(f"\b\b\b{cycle[i]}", end="")
-        i = (i + 1) % 4
-        time.sleep(1)
-        led1.toggle()
-        led2.toggle()
-    
-    print("\b\b\b   ")
-    # Check if connection is successful
-    if wlan.status() != network.STAT_GOT_IP:
-        print('Failed to connect to Wi-Fi')
-        return False
-    else:
-        print('Connection successful!')
-        network_info = wlan.ifconfig()
-        print('IP address:', network_info[0])
-        return True
 
 @micropython.native
 def calibrate_average_rms(n: int) -> tuple:
@@ -136,7 +97,7 @@ def init_RTC():
     return rtc_time_data['datetime']
 
 def init_file(baseline, rms, threshold, reset_threshold, now, is_leader) -> io.TextIOWrapper:
-    """ open file for writing, with date and time in the filename """
+    """ open file for writing, with date and time in the filename. write metadata. return filehandle """
     now2 = time.localtime()
     year = now2[0]
     month = now2[1]
@@ -256,7 +217,6 @@ def index(request):
                         .then(data => {
                             document.getElementById('rate').innerHTML = data.rate;
                             document.getElementById('muon_count').innerHTML = data.muon_count;
-                            document.getElementById('iteration_count').innerHTML = data.iteration_count;
                             document.getElementById('reset_threshold').innerHTML = data.reset_threshold;
                             document.getElementById('threshold').innerHTML = data.threshold;
 
@@ -392,10 +352,6 @@ def index(request):
                             <td id="muon_count">""" + str(muon_count) + """</td>
                         </tr>
                         <tr>
-                            <td>Iteration Count</td>
-                            <td id="iteration_count">""" + str(iteration_count) + """</td>
-                        </tr>
-                        <tr>
                             <td>Threshold (ADC counts)</td>
                             <td id="threshold">""" + str(threshold) + """</td>
                         </tr>
@@ -427,7 +383,6 @@ def data(request):
     return Response(body=json.dumps({
         'rate': round(rate,1),
         'muon_count': muon_count,
-        'iteration_count': iteration_count,
         'threshold': threshold,
         'reset_threshold': reset_threshold
     }), headers={'Content-Type': 'application/json'})
@@ -460,16 +415,6 @@ def join_path(directory, filename):
         return directory + filename
     else:
         return directory + '/' + filename
-
-# Helper function to get file modification time
-@micropython.native
-def get_file_mtime(filepath):
-    try:
-        # Use os.stat() to get file metadata and extract the modification time
-        stat = os.stat(filepath)
-        return stat[8]  # `st_mtime` is the 9th element in the tuple (index 8)
-    except:
-        return 0  # If it fails, return 0 as a default
 
 
 # Route to list and allow downloads of CSV files from the /sd directory
@@ -589,8 +534,8 @@ def technical_page(request):
                     <td>{is_leader}</td>
                 </tr>
                 <tr>
-                    <td>Parameter 4</td>
-                    <td>Value 4</td>
+                    <td>Iteration</td>
+                    <td>{iteration_count}</td>
                 </tr>
                 </tbody>
             </table>
@@ -647,16 +592,15 @@ usr_switch = Pin(16, Pin.IN, Pin.PULL_DOWN)
 switch_pressed = False
 usr_switch.irq(trigger=Pin.IRQ_RISING, handler=usr_switch_pressed)
 
-# I think these need to set up the pins, too
-adc = ADC(Pin(26))       # create ADC object on ADC pin
-adc_temp = ADC(Pin(27))  # create ADC object on ADC pin
 
 led1 = Pin('LED', Pin.OUT)
 led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
 
-print("wifi init....")
-if not init_wifi(my_secrets.SSID, my_secrets.PASS):
-    print("Couldn't initialize wifi")
+# check if the network is active. It should already be 
+# set up from boot.py
+wlan = network.WLAN(network.STA_IF)
+if not wlan.active():
+    print("Wifi is not active")
     while True:
         led1.toggle()
         time.sleep(0.5)
@@ -667,6 +611,10 @@ if not init_wifi(my_secrets.SSID, my_secrets.PASS):
 
 now = init_RTC()
 print(f"current time is {now}")
+
+# I think these need to set up the pins, too
+adc = ADC(Pin(26))       # create ADC object on ADC pin
+adc_temp = ADC(Pin(27))  # create ADC object on ADC pin
 
 baseline, rms = calibrate_average_rms(500)
 
@@ -697,14 +645,13 @@ f = init_file(baseline, rms, threshold, reset_threshold, now, is_leader)
 async def main():
     global muon_count, iteration_count, rate, waited, switch_pressed, avg_time
     server = asyncio.create_task(app.start_server(port=80, debug=True))
-    #tight_loop(threshold, reset_threshold, f)
     print("tight loop started")
     l1t = led1.toggle
     l2on = led2.on
     l2off = led2.off
-    adc = ADC(0)  # Pin 26 is GP26, which is ADC0
+    adc = ADC(0)  # Pin 26 is GP26, which is ADC0. Assumption is that pins were set up earlier.
     readout = adc.read_u16
-    temperature_adc = ADC(1) #l Pin 27 is GP27, which is ADC1
+    temperature_adc = ADC(1) #l Pin 27 is GP27, which is ADC1. Same comment about pin setup.
     #t_readout = temperature_adc.read_u16
 
     tmeas = time.ticks_ms
@@ -727,7 +674,6 @@ async def main():
     coincidence = 0
     loop_timer_time = tmeas()
     while True:
-        #wdt.feed()
         iteration_count += 1
         if iteration_count % INNER_ITER_LIMIT == 0:
             rate = 1000./dts.calculate_average()
