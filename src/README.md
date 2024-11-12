@@ -35,21 +35,24 @@ The web server rate graph stores all the data on the client side (i.e., your bro
 
 
 ## Newer files that are of interest (10/21/2024)
+
 - readout.py: readout w/o web server. Obsolete.
-- asynchio4.py: current version that uses `asyncio` and [microdot](https://microdot.readthedocs.io/en/latest) for web services, and also provides the readout.
-    - this requires you to install the following files
+- asynchio4.py: current version that uses `asyncio` and [microdot](https://microdot.readthedocs.io/en/latest) for web services, and also provides the readout. This requires you to install the following files
     1. `microdot.py` and `__init__.py` from the microdot repo. Pre-compile using mpy-cross to generate `mpy` file and install that to save memory.
     1. `mpy-cross microdot.py; mpremote fs cp microdot.mpy :`; same for `__init__.py`
     1. `RingBuffer.py` from the local repo, install via `mpremote fs cp RingBuffer.py :`
-    1. Create and install `my_secrets.py` which must look like this e.g., for RedRover
-        ```
+    1. Create and install `my_secrets.py` which must look like this e.g., for RedRover:
+
+        ```python
         PASS=None
         SSID=RedRover
         ```
+
     1. Copy `boot.py` to the board: `mpremote fs cp boot.py :`
     1. Run via `mpremote run asynchio4.py` from the terminal.
 
 ### Automatic startup
+
 To have the web page and readout run by default, the python file needs to be copied to the pico as `main.py`:
 
 ```shell
