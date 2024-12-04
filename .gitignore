@@ -166,3 +166,4 @@ src/typings
 src/my_secrets.py
 src/*.mpy
 /.vscode
+.micropico
