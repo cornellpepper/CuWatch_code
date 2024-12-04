@@ -46,7 +46,11 @@ def init_wifi(ssid, password):
         print('IP address:', network_info[0])
         return True
 
+led1 = None
+led2 = None
+
 def main():
+    global led1, led2
     led1 = Pin('LED', Pin.OUT)
     led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
 
