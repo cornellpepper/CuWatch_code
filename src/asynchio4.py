@@ -210,6 +210,38 @@ def index(request):
                     loadGraphData(rateChart);
                 }
 
+                // Function to fetch historical data from the server
+                function fetchHistoricalData() {
+                    fetch('/refresh_data')
+                        .then(response => response.json())
+                        .then(data => {
+                            // Update chart with historical data
+                            const now = new Date();
+
+                            // Clear existing data
+                            rateChart.data.labels = [];
+                            rateChart.data.datasets[0].data = [];
+
+                            // Add historical data to the chart
+                            data.forEach((rate, index) => {
+                                // Calculate the timestamp for each data point
+                                const timestamp = new Date(now.getTime() - index * 60 * 1000); // 1 minute apart
+                                rateChart.data.labels.unshift(timestamp); // Add the timestamp
+                                rateChart.data.datasets[0].data.unshift(rate); // Add the rate
+                            });
+
+                            // Update the chart
+                            rateChart.update();
+
+                            // Save graph data to local storage
+                            saveGraphData(rateChart);
+                        })
+                        .catch(error => {
+                            console.error('Error fetching historical data:', error);
+                        });
+                }
+
+
                 // Fetch updated rate, muon_count, iteration_count every 30 seconds
                 function fetchData() {
                     fetch('/data')
@@ -280,6 +312,13 @@ def index(request):
 
 
                 setInterval(fetchData, 30000);  // Update every 30 seconds
+
+                // Reload historical data when the window gains focus
+                window.addEventListener('focus', () => {
+                    console.log('Window focused, reloading historical data...');
+                    fetchHistoricalData(); // Fetch historical data from the server
+                });
+
             </script>
             <style>
                 body {
@@ -561,6 +600,15 @@ def usr_switch_pressed(pin):
     if pin.value() == 1:
         switch_pressed = True
 
+@app.route('/refresh_data', methods=['GET'])
+def refresh_data(request):
+    global rates
+    if rates is not None:
+        data = list(rates.get())
+        print(data)
+        return Response(body=json.dumps(data), headers={'Content-Type': 'application/json'})
+    else:
+        return Response(body=json.dumps([]), headers={'Content-Type': 'application/json'})
 
 def check_leader_status():
     """check if this node is the leader or not. If the file /sd/is_secondary exists, then this is a secondary node"""
@@ -582,6 +630,7 @@ threshold = 0
 reset_threshold = 0
 is_leader = True
 avg_time = 0.
+rates = RingBuffer.RingBuffer(60,'f')
 ##################################################################
 
 ##################################################################
@@ -591,6 +640,11 @@ avg_time = 0.
 usr_switch = Pin(16, Pin.IN, Pin.PULL_DOWN)
 switch_pressed = False
 usr_switch.irq(trigger=Pin.IRQ_RISING, handler=usr_switch_pressed)
+
+# # HV supply -- active low pin to turn off
+# # the high voltage power supply
+# hv_power_enable = Pin(19, Pin.OUT)
+# hv_power_enable.on() # turn on the HV supply
 
 
 led1 = Pin('LED', Pin.OUT)
@@ -616,6 +670,18 @@ print(f"current time is {now}")
 adc = ADC(Pin(26))       # create ADC object on ADC pin
 adc_temp = ADC(Pin(27))  # create ADC object on ADC pin
 
+# # calibrate the threshold with HV off
+# hv_power_enable.off()
+# baseline, rms = calibrate_average_rms(500)
+
+# # 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts
+# # is 50 mV above threshold. the signal in Sally is about 0.5V.
+# threshold = int(round(baseline + 1000.))
+# reset_threshold = round(baseline + 50.)
+# print(f"baseline: {baseline}, threshold: {threshold}, reset_threshold: {reset_threshold}")
+
+# # calibrate the threshold with HV on
+# hv_power_enable.on()
 baseline, rms = calibrate_average_rms(500)
 
 # 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts
@@ -644,6 +710,7 @@ f = init_file(baseline, rms, threshold, reset_threshold, now, is_leader)
 
 async def main():
     global muon_count, iteration_count, rate, waited, switch_pressed, avg_time
+    global rates
     server = asyncio.create_task(app.start_server(port=80, debug=True))
     print("tight loop started")
     l1t = led1.toggle
@@ -677,6 +744,7 @@ async def main():
         iteration_count += 1
         if iteration_count % INNER_ITER_LIMIT == 0:
             rate = 1000./dts.calculate_average()
+            rates.append(rate)
             tdiff = time.ticks_diff(tmeas(), loop_timer_time)
             avg_time = tdiff/INNER_ITER_LIMIT
             print(f"iter {iteration_count}, # {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free, avg time {avg_time:.3f} ms")
@@ -751,3 +819,6 @@ except Exception as e:
         pass
     unmount_sdcard()
     print("done")
+
+# just restart at the end 
+machine.reset()

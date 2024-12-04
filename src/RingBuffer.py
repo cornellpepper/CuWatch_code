@@ -2,13 +2,14 @@
 import array
 
 class RingBuffer:
-    def __init__(self, size):
+    def __init__(self, size, typecode='I'):
         """Initialize the ring buffer with a fixed size."""
         self.size = size
-        self.buffer = array.array('I', [0] * size)  # Unsigned integers array
+        self.buffer = array.array(typecode, [0] * size)  # Unsigned integers array
         self.head = 0  # Points to the oldest element
         self.tail = 0  # Points to the next write position
         self.is_full = False  # Indicates if the buffer is full
+        self.current = 0  # Iterator current position
 
     def append(self, value):
         """Add a new unsigned integer to the buffer."""
@@ -38,6 +39,7 @@ class RingBuffer:
         self.tail = 0
         self.is_full = False
         self.buffer = array.array('I', [0] * self.size)
+
     def calculate_average(self):
         """Calculate the average of the values in the buffer, returning a float."""
         if self.is_empty():
@@ -45,8 +47,22 @@ class RingBuffer:
         items = self.get()
         return float(sum(items)) / len(items)  # Ensure the result is a float
 
+    def __iter__(self):
+        """Return the iterator object itself."""
+        self.current = self.head if self.is_full else 0
+        return self
 
-# # Example usage:
+    def __next__(self):
+        """Return the next value from the buffer."""
+        if self.is_empty() or (not self.is_full and self.current == self.tail):
+            raise StopIteration
+        value = self.buffer[self.current]
+        self.current = (self.current + 1) % self.size
+        if self.current == self.tail and not self.is_full:
+            raise StopIteration
+        return value
+
+# Example usage:
 # buffer = RingBuffer(5)
 
 # # Adding values to the buffer
@@ -58,8 +74,7 @@ class RingBuffer:
 
 # # The buffer is full now, so adding more will overwrite the oldest value
 # buffer.append(60)  # Overwrites 10
-# buffer.append(70)  # Overwrites 20
 
-# # Calculate average of the current values in the buffer
-# average = buffer.calculate_average()
-# print(f"Average: {average}")  # Should print the average of [30, 40, 50, 60, 70]
+# # Iterate over the buffer
+# for value in buffer:
+#     print(value)
