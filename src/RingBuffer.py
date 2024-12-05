@@ -61,6 +61,18 @@ class RingBuffer:
         if self.current == self.tail and not self.is_full:
             raise StopIteration
         return value
+    
+    def get_head(self):
+        """Return the head value of the buffer."""
+        if self.is_empty():
+            return None  # Return None if the buffer is empty
+        return self.buffer[self.head]
+    
+    def get_tail(self):
+        """Return the tail value of the buffer."""
+        if self.is_empty():
+            return None
+        return self.buffer[self.tail - 1]
 
 # Example usage:
 # buffer = RingBuffer(5)

@@ -604,7 +604,7 @@ def usr_switch_pressed(pin):
 def refresh_data(request):
     global rates
     if rates is not None:
-        data = list(rates.get())
+        data = list(rates.get())[::-1]
         print(data)
         return Response(body=json.dumps(data), headers={'Content-Type': 'application/json'})
     else:
@@ -732,6 +732,7 @@ async def main():
     waited = 0
     dt = 0.
     run_start_time = start_time
+    tlast = start_time
     temperature_adc_value = 0
 
     INNER_ITER_LIMIT = const(400_000)
@@ -744,12 +745,17 @@ async def main():
         iteration_count += 1
         if iteration_count % INNER_ITER_LIMIT == 0:
             rate = 1000./dts.calculate_average()
-            rates.append(rate)
             tdiff = time.ticks_diff(tmeas(), loop_timer_time)
             avg_time = tdiff/INNER_ITER_LIMIT
             print(f"iter {iteration_count}, # {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free, avg time {avg_time:.3f} ms")
             l1t()
             loop_timer_time = tmeas()
+            # update rates ring buffer every minute
+            if time.ticks_diff(loop_timer_time, tlast) >= 60000:  # 60,000 ms = 1 minute
+                print("updating rates")
+                rates.append(rate)
+                print(rates.get())
+                tlast = loop_timer_time
             if iteration_count % OUTER_ITER_LIMIT == 0:
                 print("flush file, iter ", iteration_count, gc.mem_free())
                 f.flush()
