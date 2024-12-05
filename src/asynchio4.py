@@ -2,6 +2,7 @@ from machine import ADC, Pin, RTC
 import asyncio
 import machine
 import sdcard
+import sys
 import time
 import io
 import uos as os
@@ -23,7 +24,7 @@ app = Microdot()
 
 
 @micropython.native
-def calibrate_average_rms(n: int) -> tuple:
+async def calibrate_average_rms(n: int) -> tuple:
     """calibrate the threshold value by taking the average of n samples. Assumes no muons are present"""
     led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
     adc = ADC(0)  # Pin 26 is GP26, which is ADC0
@@ -34,7 +35,7 @@ def calibrate_average_rms(n: int) -> tuple:
         sumval += value
         sum_squared += value ** 2
         led2.toggle()
-        time.sleep_ms(25) # wait 
+        await asyncio.sleep_ms(10) # wait 
     mean = sumval / n
     variance = (sum_squared / n) - (mean ** 2)
     standard_deviation = variance ** 0.5
@@ -643,7 +644,6 @@ usr_switch.irq(trigger=Pin.IRQ_RISING, handler=usr_switch_pressed)
 
 # # HV supply -- active low pin to turn off
 # # the high voltage power supply
-# hv_power_enable = Pin(19, Pin.OUT)
 # hv_power_enable.on() # turn on the HV supply
 
 
@@ -665,61 +665,53 @@ if not wlan.active():
 
 now = init_RTC()
 print(f"current time is {now}")
-
-# I think these need to set up the pins, too
-adc = ADC(Pin(26))       # create ADC object on ADC pin
-adc_temp = ADC(Pin(27))  # create ADC object on ADC pin
-
-# # calibrate the threshold with HV off
-# hv_power_enable.off()
-# baseline, rms = calibrate_average_rms(500)
-
-# # 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts
-# # is 50 mV above threshold. the signal in Sally is about 0.5V.
-# threshold = int(round(baseline + 1000.))
-# reset_threshold = round(baseline + 50.)
-# print(f"baseline: {baseline}, threshold: {threshold}, reset_threshold: {reset_threshold}")
-
-# # calibrate the threshold with HV on
-# hv_power_enable.on()
-baseline, rms = calibrate_average_rms(500)
-
-# 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts
-# is 50 mV above threshold. the signal in Sally is about 0.5V.
-threshold = int(round(baseline + 1000.))
-reset_threshold = round(baseline + 50.)
-print(f"baseline: {baseline}, threshold: {threshold}, reset_threshold: {reset_threshold}")
-
-
-
-
 init_sdcard()
 
-coincidence_pin = None
-is_leader = check_leader_status()
-if is_leader:
-    coincidence_pin = Pin(14, Pin.IN)
-else:
-    coincidence_pin = Pin(14, Pin.OUT)
-print("is_leader is ", is_leader)
 
-
-f = init_file(baseline, rms, threshold, reset_threshold, now, is_leader)
 
 
 
 async def main():
     global muon_count, iteration_count, rate, waited, switch_pressed, avg_time
-    global rates
+    global rates, threshold, reset_threshold
     server = asyncio.create_task(app.start_server(port=80, debug=True))
-    print("tight loop started")
+    print("main() started")
     l1t = led1.toggle
     l2on = led2.on
     l2off = led2.off
-    adc = ADC(0)  # Pin 26 is GP26, which is ADC0. Assumption is that pins were set up earlier.
+    adc = ADC(Pin(26))       # create ADC object on ADC pin, Pin 26
+    temperature_adc = ADC(Pin(27))  # create ADC object on ADC pin Pin 27
+
     readout = adc.read_u16
-    temperature_adc = ADC(1) #l Pin 27 is GP27, which is ADC1. Same comment about pin setup.
-    #t_readout = temperature_adc.read_u16
+    # # calibrate the threshold with HV off
+    # hv_power_enable.off()
+    # baseline, rms = calibrate_average_rms(500)
+
+    # # 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts
+    # # is 50 mV above threshold. the signal in Sally is about 0.5V.
+    # threshold = int(round(baseline + 1000.))
+    # reset_threshold = round(baseline + 50.)
+    # print(f"baseline: {baseline}, threshold: {threshold}, reset_threshold: {reset_threshold}")
+
+    # calibrate the threshold with HV on
+    hv_power_enable = Pin(19, Pin.OUT)
+    hv_power_enable.on()
+    baseline, rms = await calibrate_average_rms(500)
+    # 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts
+    # is 50 mV above threshold. the signal in Sally is about 0.5V.
+    threshold = int(round(baseline + 1000.))
+    reset_threshold = round(baseline + 50.)
+    print(f"baseline: {baseline}, threshold: {threshold}, reset_threshold: {reset_threshold}")
+
+    coincidence_pin = None
+    is_leader = check_leader_status()
+    if is_leader:
+        coincidence_pin = Pin(14, Pin.IN)
+    else:
+        coincidence_pin = Pin(14, Pin.OUT)
+    print("is_leader is ", is_leader)
+
+    f = init_file(baseline, rms, threshold, reset_threshold, now, is_leader)
 
     tmeas = time.ticks_ms
     tusleep = time.sleep_us
@@ -740,6 +732,7 @@ async def main():
 
     dts = RingBuffer.RingBuffer(50)
     coincidence = 0
+    print("start of data taking loop")
     loop_timer_time = tmeas()
     while True:
         iteration_count += 1
@@ -750,11 +743,9 @@ async def main():
             print(f"iter {iteration_count}, # {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free, avg time {avg_time:.3f} ms")
             l1t()
             loop_timer_time = tmeas()
-            # update rates ring buffer every minute
+            # update rates ring buffer every half minute. this time needs to be synched with the web server
             if time.ticks_diff(loop_timer_time, tlast) >= 30000:  # 30,000 ms = 30 seconds
-                print("updating rates")
                 rates.append(rate)
-                #print(rates.get())
                 tlast = loop_timer_time
             if iteration_count % OUTER_ITER_LIMIT == 0:
                 print("flush file, iter ", iteration_count, gc.mem_free())
@@ -818,7 +809,7 @@ except KeyboardInterrupt:
     unmount_sdcard()
     print("done")
 except Exception as e:
-    print("exception ", e)
+    sys.print_exception(e)
     try:
         f.close()
     except:
