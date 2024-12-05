@@ -314,10 +314,12 @@ def index(request):
 
                 setInterval(fetchData, 30000);  // Update every 30 seconds
 
-                // Reload historical data when the window gains focus
-                window.addEventListener('focus', () => {
-                    console.log('Window focused, reloading historical data...');
-                    fetchHistoricalData(); // Fetch historical data from the server
+                // Add event listener for visibility change
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'visible') {
+                        console.log('Window focused, reloading historical data...');
+                        fetchHistoricalData(); // Fetch historical data from the server
+                    }
                 });
 
             </script>
@@ -421,7 +423,7 @@ def index(request):
 def data(request):
     """Return the current rate, muon_count, and iteration_count as JSON"""
     return Response(body=json.dumps({
-        'rate': round(rates.get_head(),1),
+        'rate': round(rates.get_tail(),1),
         'muon_count': muon_count,
         'threshold': threshold,
         'reset_threshold': reset_threshold
@@ -606,7 +608,7 @@ def refresh_data(request):
     global rates
     if rates is not None:
         data = list(rates.get())[::-1]
-        print(data)
+        #print(data)
         return Response(body=json.dumps(data), headers={'Content-Type': 'application/json'})
     else:
         return Response(body=json.dumps([]), headers={'Content-Type': 'application/json'})
@@ -818,4 +820,4 @@ except Exception as e:
     print("done")
 
 # just restart at the end 
-machine.reset()
+# machine.reset()
