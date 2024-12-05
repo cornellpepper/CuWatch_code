@@ -225,7 +225,7 @@ def index(request):
                             // Add historical data to the chart
                             data.forEach((rate, index) => {
                                 // Calculate the timestamp for each data point
-                                const timestamp = new Date(now.getTime() - index * 60 * 1000); // 1 minute apart
+                                const timestamp = new Date(now.getTime() - index * 30 * 1000); // 30 seconds apart
                                 rateChart.data.labels.unshift(timestamp); // Add the timestamp
                                 rateChart.data.datasets[0].data.unshift(rate); // Add the rate
                             });
@@ -420,7 +420,7 @@ def index(request):
 def data(request):
     """Return the current rate, muon_count, and iteration_count as JSON"""
     return Response(body=json.dumps({
-        'rate': round(rate,1),
+        'rate': round(rates.get_head(),1),
         'muon_count': muon_count,
         'threshold': threshold,
         'reset_threshold': reset_threshold
@@ -630,7 +630,7 @@ threshold = 0
 reset_threshold = 0
 is_leader = True
 avg_time = 0.
-rates = RingBuffer.RingBuffer(60,'f')
+rates = RingBuffer.RingBuffer(120,'f')
 ##################################################################
 
 ##################################################################
@@ -751,10 +751,10 @@ async def main():
             l1t()
             loop_timer_time = tmeas()
             # update rates ring buffer every minute
-            if time.ticks_diff(loop_timer_time, tlast) >= 60000:  # 60,000 ms = 1 minute
+            if time.ticks_diff(loop_timer_time, tlast) >= 30000:  # 30,000 ms = 30 seconds
                 print("updating rates")
                 rates.append(rate)
-                print(rates.get())
+                #print(rates.get())
                 tlast = loop_timer_time
             if iteration_count % OUTER_ITER_LIMIT == 0:
                 print("flush file, iter ", iteration_count, gc.mem_free())
