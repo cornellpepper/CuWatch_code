@@ -281,6 +281,17 @@ def index(request):
                             console.error('Error invoking method:', error);
                         });
                 }
+                // Function to handle button click to invoke a method on the microcontroller
+                function restartRequest() {
+                    fetch('/request-restart', { method: 'POST' })
+                        .then(response => response.json())
+                        .then(data => {
+                            console.log('Method invoked:', data);
+                        })
+                        .catch(error => {
+                            console.error('Error invoking method:', error);
+                        });
+                }
                 function updateThreshold() {
                     // Retrieve the new threshold value from the input field
                     const newThreshold = document.getElementById('thresholdInput').value;
@@ -365,7 +376,13 @@ def index(request):
                         <a class="nav-link" href="/download">Download Data</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="/technical">Technical</a>
+                    </li>
+                    <li class="nav-item">
                         <button class="btn btn-secondary" onclick="invokeMicrocontrollerMethod()">Stop Run</button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="btn btn-secondary" onclick="restartRequest()">Restart Run</button>
                     </li>
                     <li class="nav-item">
                         <input type="number" id="thresholdInput" class="form-control" placeholder="Enter new threshold">
@@ -422,8 +439,11 @@ def index(request):
 @app.route('/data', methods=['GET'])
 def data(request):
     """Return the current rate, muon_count, and iteration_count as JSON"""
+    myrate = rates.get_tail()
+    if myrate is None:
+       myrate = 0.
     return Response(body=json.dumps({
-        'rate': round(rates.get_tail(),1),
+        'rate': round(myrate,1),
         'muon_count': muon_count,
         'threshold': threshold,
         'reset_threshold': reset_threshold
@@ -448,6 +468,14 @@ def request_shutdown(request):
     global shutdown_request
     shutdown_request = True
     return {"status": "Shutdown request sent"}
+
+# Route to handle restart request
+@app.route('/request-restart', methods=['POST'])
+def request_restart(request):
+    global restart_request
+    restart_request = True
+    await app.shutdown()
+    return {"status": "Reset request sent"}
 
 
 # Helper function to concatenate paths (since os.path.join is not available)
@@ -625,6 +653,7 @@ def check_leader_status():
 # these variables are used for communication between web server
 # and readout thread
 shutdown_request = False
+restart_request = False
 muon_count = 0
 iteration_count = 0
 rate = 0.
@@ -793,11 +822,11 @@ async def main():
                 coincidence_pin.value(0)
         if iteration_count % 1_000 == 0:
             await asyncio.sleep_ms(0) # this yields to the web server running in the other thread
-        if shutdown_request or switch_pressed:
+        if shutdown_request or switch_pressed or restart_request:
             print("tight loop shutdown, waited is ", waited)
             break
     f.close()
-    #await server
+    await server
 
 # start the web server and wait for exceptions to end it. 
 try: 
@@ -819,5 +848,5 @@ except Exception as e:
     unmount_sdcard()
     print("done")
 
-# just restart at the end 
-# machine.reset()
+if restart_request:
+    machine.reset()
