@@ -42,8 +42,9 @@ async def calibrate_average_rms(n: int) -> tuple:
     led2.value(0)
     return mean, standard_deviation
 
-# Define SPI pins -- see schematic for Pepper V2 board
+
 def init_sdcard():
+    """ Initialize the SD card interface on the base board"""
 # Define SPI pins -- see schematic for Pepper V2 board
     spi = machine.SPI(0, sck=machine.Pin(2), mosi=machine.Pin(3), miso=machine.Pin(0))
     cs = machine.Pin(1, machine.Pin.OUT)  # Chip select pin
@@ -129,6 +130,11 @@ SD_DIRECTORY = '/sd'
 ## Main route that serves the form, graph, and global variables
 @app.route('/', methods=['GET'])
 def index(request):
+    """Main route that serves the form, graph, and global variables"""
+    myrate = rates.get_tail()
+    if myrate is None:
+       myrate = 0.
+
     html = """
     <!doctype html>
     <html>
@@ -381,7 +387,7 @@ def index(request):
                     <tbody>
                         <tr>
                             <td>Rate (Hz)</td>
-                            <td id="rate">""" + str(rate) + """</td>
+                            <td id="rate">""" + str(myrate) + """</td>
                         </tr>
                         <tr>
                             <td>Muon Count</td>
@@ -459,7 +465,7 @@ def request_restart(request):
 def make_leader(request):
     global is_leader
     secondary_marker = "is_secondary"
-    if secondary_marker in os.listdir("/sd"):
+    if secondary_marker in os.listdir(SD_DIRECTORY):
         os.remove(join_path('/sd', secondary_marker))
         print(f"Removed {secondary_marker}")
     else:
@@ -473,9 +479,7 @@ def make_leader(request):
 def make_follower(request):
     global is_leader
     secondary_marker = "is_secondary"
-    #print(f"Checking if {secondary_marker} exists")
-    #print (os.listdir("/sd"))
-    if secondary_marker in os.listdir("/sd"):
+    if secondary_marker in os.listdir(SD_DIRECTORY):
         print(f"{secondary_marker} already exists")
     else:
         with open(join_path('/sd', secondary_marker), "w") as f:
@@ -577,7 +581,7 @@ def download_file(request):
 
 @app.route('/technical')
 def technical_page(request):
-    other_code = """
+    javascript = """
     <script>
     function makeLeader() {
         fetch('/make-leader', { method: 'POST' })
@@ -610,7 +614,7 @@ def technical_page(request):
             </title>
             <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
             <link rel="stylesheet" href="/styles.css">
-            {other_code}
+            {javascript}
         </head>
         <body class="bg-light">
             <div class="sidebar">
