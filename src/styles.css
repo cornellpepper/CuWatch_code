@@ -6,6 +6,23 @@ body {
     margin: 0;
     padding: 0;
 }
+/* Sidebar styling */
+.sidebar {
+    width: 250px;
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    background-color: #f8f9fa;
+    padding-top: 20px;
+}
+
+/* Content styling */
+.content {
+    margin-left: 250px; /* Make space for the sidebar */
+    padding: 20px;
+    width: calc(100% - 250px);
+}
 
 /* Header styling */
 .header {
@@ -24,20 +41,6 @@ body {
     border-collapse: collapse;
 }
 
-.table th, .table td {
-    padding: 12px;
-    border: 1px solid #ddd;
-    text-align: left;
-}
-
-.table th {
-    background-color: #333;
-    color: white;
-}
-
-.table-striped tbody tr:nth-of-type(odd) {
-    background-color: #f9f9f9;
-}
 
 /* Button styling */
 .btn {
@@ -71,9 +74,9 @@ input.form-control {
 }
 
 footer {
-    text-align: center;
-    padding: 1em;
-    background-color: #e9ecef;
-    color: #6c757d;
-    font-size: 0.9em;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    background-color: #f8f9fa;
+    padding: 10px 0;
 }

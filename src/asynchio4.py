@@ -135,6 +135,7 @@ def index(request):
         <head>
             <title>CuWatch</title>
             <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+            <link rel="stylesheet" href="/styles.css">
             <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
             <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>  <!-- Include date adapter -->
             <script>
@@ -335,30 +336,6 @@ def index(request):
 
             </script>
             <style>
-                body {
-                    display: block;
-                }
-                .sidebar {
-                    width: 250px;
-                    height: 100vh;
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    background-color: #f8f9fa;
-                    padding-top: 20px;
-                }
-                .content {
-                    margin-left: 250px;
-                    padding: 20px;
-                    width: calc(100% - 250px);
-                }
-                footer {
-                    position: fixed;
-                    bottom: 0;
-                    width: 100%;
-                    background-color: #f8f9fa;
-                    padding: 10px 0;
-                }
                 #rateChart {
                     width: 100%;  /* Make the canvas take the full width of its container */
                     height: auto; /* Maintain the aspect ratio */
@@ -404,7 +381,7 @@ def index(request):
                     <tbody>
                         <tr>
                             <td>Rate (Hz)</td>
-                            <td id="rate">""" + "{:.1f}".format(rate) + """</td>
+                            <td id="rate">""" + str(rate) + """</td>
                         </tr>
                         <tr>
                             <td>Muon Count</td>
@@ -443,7 +420,7 @@ def data(request):
     if myrate is None:
        myrate = 0.
     return Response(body=json.dumps({
-        'rate': round(myrate,1),
+        'rate': myrate,
         'muon_count': muon_count,
         'threshold': threshold,
         'reset_threshold': reset_threshold
@@ -477,6 +454,35 @@ def request_restart(request):
     await app.shutdown()
     return {"status": "Reset request sent"}
 
+# route to handle make-leader request
+@app.route('/make-leader', methods=['POST'])
+def make_leader(request):
+    global is_leader
+    secondary_marker = "is_secondary"
+    if secondary_marker in os.listdir("/sd"):
+        os.remove(join_path('/sd', secondary_marker))
+        print(f"Removed {secondary_marker}")
+    else:
+        print(f"{secondary_marker} does not exist")
+
+    is_leader = True
+    return {"status": "Make Leader invoked"}
+
+# route to handle make-follower request
+@app.route('/make-follower', methods=['POST'])
+def make_follower(request):
+    global is_leader
+    secondary_marker = "is_secondary"
+    #print(f"Checking if {secondary_marker} exists")
+    #print (os.listdir("/sd"))
+    if secondary_marker in os.listdir("/sd"):
+        print(f"{secondary_marker} already exists")
+    else:
+        with open(join_path('/sd', secondary_marker), "w") as f:
+            f.write("This node is a follower")
+        print(f"Created {secondary_marker}")
+    is_leader = False
+    return {"status": "Make Follower invoked"}
 
 # Helper function to concatenate paths (since os.path.join is not available)
 @micropython.native
@@ -571,6 +577,31 @@ def download_file(request):
 
 @app.route('/technical')
 def technical_page(request):
+    other_code = """
+    <script>
+    function makeLeader() {
+        fetch('/make-leader', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Make Leader invoked:', data);
+            })
+            .catch(error => {
+                console.error('Error invoking Make Leader:', error);
+            });
+    }
+
+    function makeFollower() {
+        fetch('/make-follower', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Make Follower invoked:', data);
+            })
+            .catch(error => {
+                console.error('Error invoking Make Follower:', error);
+            });
+    }
+    </script>
+    """
     html = f"""
     <!doctype html>
     <html>
@@ -579,38 +610,65 @@ def technical_page(request):
             </title>
             <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
             <link rel="stylesheet" href="/styles.css">
+            {other_code}
         </head>
         <body class="bg-light">
-            <div class="container">
-            <h1 class="my-4 text-center">CuWatch Technical Information</h1>
-            <table class="table table-striped table-bordered">
-                <thead class="thead-dark">
-                <tr>
-                    <th>Parameter</th>
-                    <th>Value</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr>
-                    <td>Loop time (ms) </td>
-                    <td>{avg_time}</td>
-                </tr>
-                <tr>
-                    <td>Waited</td>
-                    <td>{waited}</td>
-                </tr>
-                <tr>
-                    <td>Leader</td>
-                    <td>{is_leader}</td>
-                </tr>
-                <tr>
-                    <td>Iteration</td>
-                    <td>{iteration_count}</td>
-                </tr>
-                </tbody>
-            </table>
-            <a href="/">Back to Home</a>
+            <div class="sidebar">
+                <h2 class="text-center">CuWatch</h2>
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/download">Download Data</a>
+                    </li>
+                </ul>
+                <li class="nav-item">
+                    <button class="btn btn-secondary" onclick="makeLeader()">Make Leader</button>
+                </li>
+                <li class="nav-item">
+                    <button class="btn btn-secondary" onclick="makeFollower()">Make Follower</button>
+                </li>
+                <div class="static-text p-3 rounded mt-3">
+                    <p>Leader and follower changes take effect on next new run.</p>
+                </div>
+
+                <p id="time" class="text-center mt-4"></p>
             </div>
+
+            <div class="content">
+                <h1 class="my-4 text-center">CuWatch Technical Information</h1>
+                <table class="table table-striped table-bordered">
+                    <thead class="thead-dark">
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Value</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr>
+                        <td>Loop time (ms) </td>
+                        <td>{avg_time}</td>
+                    </tr>
+                    <tr>
+                        <td>Waited</td>
+                        <td>{waited}</td>
+                    </tr>
+                    <tr>
+                        <td>Leader</td>
+                        <td>{is_leader}</td>
+                    </tr>
+                    <tr>
+                        <td>Iteration</td>
+                        <td>{iteration_count}</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+            <footer class="text-center mt-5">
+                <p class="text-muted">Powered by MicroPython and Microdot</p>
+            </footer>
+
         </body>
     </html>
     """
@@ -704,7 +762,7 @@ init_sdcard()
 
 async def main():
     global muon_count, iteration_count, rate, waited, switch_pressed, avg_time
-    global rates, threshold, reset_threshold
+    global rates, threshold, reset_threshold, is_leader
     server = asyncio.create_task(app.start_server(port=80, debug=True))
     print("main() started")
     l1t = led1.toggle
@@ -776,7 +834,7 @@ async def main():
             loop_timer_time = tmeas()
             # update rates ring buffer every half minute. this time needs to be synched with the web server
             if time.ticks_diff(loop_timer_time, tlast) >= 30000:  # 30,000 ms = 30 seconds
-                rates.append(rate)
+                rates.append(round(rate, 2))
                 tlast = loop_timer_time
             if iteration_count % OUTER_ITER_LIMIT == 0:
                 print("flush file, iter ", iteration_count, gc.mem_free())
