@@ -54,7 +54,7 @@ def init_sdcard():
 
     # Mount the SD card using the uos module
     vfs = os.VfsFat(sd)
-    os.mount(vfs, "/sd")
+    os.mount(vfs, SD_DIRECTORY)
 
     # List the contents of the SD card
     print("Filesystem mounted at /sd")
@@ -63,7 +63,7 @@ def init_sdcard():
 
 def unmount_sdcard():
     os.sync()
-    os.umount("/sd")
+    os.umount(SD_DIRECTORY)
     print("SD card unmounted.")
 
 def init_RTC():
@@ -349,67 +349,68 @@ def index(request):
             </style>
         </head>
         <body class="bg-light">
-            <div class="sidebar">
-                <h2 class="text-center">CuWatch</h2>
-                <ul class="nav flex-column">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="/">Home</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/download">Download Data</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/technical">Technical</a>
-                    </li>
-                    <li class="nav-item">
-                        <button class="btn btn-secondary" onclick="invokeMicrocontrollerMethod()">Stop Run</button>
-                    </li>
-                    <li class="nav-item">
-                        <button class="btn btn-secondary" onclick="restartRequest()">Restart Run</button>
-                    </li>
-                    <li class="nav-item">
-                        <input type="number" id="thresholdInput" class="form-control" placeholder="Enter new threshold">
-                        <button class="btn btn-primary mt-2" onclick="updateThreshold()">Update Threshold</button>
-                    </li>
-                </ul>
-                <p id="time" class="text-center mt-4"></p>
-            </div>
-            <div class="content">
-                    <h1 class="my-4 text-center">CuWatch Status and Configuration</h1>
-                <!-- Display global variables in a Bootstrap table -->
-                <table class="table table-striped table-bordered">
-                    <thead class="thead-dark">
-                        <tr>
-                            <th>Variable</th>
-                            <th>Value</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Rate (Hz)</td>
-                            <td id="rate">""" + str(myrate) + """</td>
-                        </tr>
-                        <tr>
-                            <td>Muon Count</td>
-                            <td id="muon_count">""" + str(muon_count) + """</td>
-                        </tr>
-                        <tr>
-                            <td>Threshold (ADC counts)</td>
-                            <td id="threshold">""" + str(threshold) + """</td>
-                        </tr>
-                        <tr>
-                            <td>Reset threshold (ADC counts)</td>
-                            <td id="reset_threshold">""" + str(reset_threshold) + """</td>
-                        </tr>
-                    </tbody>
-                </table>
+            <div class="d-flex">
+                <div class="sidebar">
+                    <h2 class="text-center">CuWatch</h2>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="/">Home</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/download">Download Data</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/technical">Technical</a>
+                        </li>
+                        <li class="nav-item">
+                            <button class="btn btn-secondary" onclick="invokeMicrocontrollerMethod()">Stop Run</button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="btn btn-secondary" onclick="restartRequest()">Restart Run</button>
+                        </li>
+                        <li class="nav-item">
+                            <input type="number" id="thresholdInput" class="form-control" placeholder="Enter new threshold">
+                            <button class="btn btn-primary mt-2" onclick="updateThreshold()">Update Threshold</button>
+                        </li>
+                    </ul>
+                    <p id="time" class="text-center mt-4"></p>
+                </div>
+                <div class="content">
+                        <h1 class="my-4 text-center">CuWatch Status and Configuration</h1>
+                    <!-- Display global variables in a Bootstrap table -->
+                    <table class="table table-striped table-bordered">
+                        <thead class="thead-dark">
+                            <tr>
+                                <th>Variable</th>
+                                <th>Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Rate (Hz)</td>
+                                <td id="rate">""" + str(myrate) + """</td>
+                            </tr>
+                            <tr>
+                                <td>Muon Count</td>
+                                <td id="muon_count">""" + str(muon_count) + """</td>
+                            </tr>
+                            <tr>
+                                <td>Threshold (ADC counts)</td>
+                                <td id="threshold">""" + str(threshold) + """</td>
+                            </tr>
+                            <tr>
+                                <td>Reset threshold (ADC counts)</td>
+                                <td id="reset_threshold">""" + str(reset_threshold) + """</td>
+                            </tr>
+                        </tbody>
+                    </table>
 
-                <!-- Chart.js graph for Rate vs Time -->
-                <h3 class="my-4 text-center">Rate vs Time</h3>
-                <canvas id="rateChart"></canvas>
-                
+                    <!-- Chart.js graph for Rate vs Time -->
+                    <h3 class="my-4 text-center">Rate vs Time</h3>
+                    <canvas id="rateChart"></canvas>
+                    
+                </div>
             </div>
-
             <footer class="text-center mt-5">
                 <p class="text-muted">Powered by MicroPython and Microdot</p>
             </footer>
@@ -583,11 +584,18 @@ def download_file(request):
 def technical_page(request):
     javascript = """
     <script>
+        function displayTime() {
+        let now = new Date();
+        document.getElementById('time').innerHTML = now.toLocaleTimeString();
+    }
+    setInterval(displayTime, 1000);  // Update time every second
+
     function makeLeader() {
         fetch('/make-leader', { method: 'POST' })
             .then(response => response.json())
             .then(data => {
                 console.log('Make Leader invoked:', data);
+                reloadTable(); // Reload the table after making leader
             })
             .catch(error => {
                 console.error('Error invoking Make Leader:', error);
@@ -599,9 +607,21 @@ def technical_page(request):
             .then(response => response.json())
             .then(data => {
                 console.log('Make Follower invoked:', data);
+                reloadTable(); // Reload the table after making follower
             })
             .catch(error => {
                 console.error('Error invoking Make Follower:', error);
+            });
+    }
+
+    function reloadTable() {
+        fetch('/technical/table')
+            .then(response => response.text())
+            .then(html => {
+                document.getElementById('table-container').innerHTML = html;
+            })
+            .catch(error => {
+                console.error('Error reloading table:', error);
             });
     }
     </script>
@@ -610,73 +630,82 @@ def technical_page(request):
     <!doctype html>
     <html>
         <head>
-            <title>CuWatch Technical Information
-            </title>
+            <title>CuWatch Technical Information</title>
             <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
             <link rel="stylesheet" href="/styles.css">
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Include Chart.js for time -->
+            <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>  <!-- Include date adapter -->
             {javascript}
         </head>
         <body class="bg-light">
-            <div class="sidebar">
-                <h2 class="text-center">CuWatch</h2>
-                <ul class="nav flex-column">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="/">Home</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/download">Download Data</a>
-                    </li>
-                </ul>
-                <li class="nav-item">
-                    <button class="btn btn-secondary" onclick="makeLeader()">Make Leader</button>
-                </li>
-                <li class="nav-item">
-                    <button class="btn btn-secondary" onclick="makeFollower()">Make Follower</button>
-                </li>
-                <div class="static-text p-3 rounded mt-3">
-                    <p>Leader and follower changes take effect on next new run.</p>
+            <div class="d-flex">
+                <div class="sidebar bg-light p-3">
+                    <h2 class="text-center">CuWatch</h2>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="/">Home</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/download">Download Data</a>
+                        </li>
+                        <li class="nav-item">
+                            <button class="btn btn-secondary my-2" onclick="makeLeader()">Make Leader</button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="btn btn-secondary my-2" onclick="makeFollower()">Make Follower</button>
+                        </li>
+                    </ul>
+                    <div class="static-text bg-secondary text-white p-3 rounded mt-3">
+                        <p>Leader and follower changes take effect on next new run.</p>
+                    </div>
+                    <p id="time" class="text-center mt-4"></p>
                 </div>
-
-                <p id="time" class="text-center mt-4"></p>
+                <div class="content flex-grow-1 p-3">
+                    <h1 class="my-4 text-center">CuWatch Technical Information</h1>
+                    <div id="table-container">
+                        {generate_table()}
+                    </div>
+                    {javascript}
+                </div>
             </div>
-
-            <div class="content">
-                <h1 class="my-4 text-center">CuWatch Technical Information</h1>
-                <table class="table table-striped table-bordered">
-                    <thead class="thead-dark">
-                    <tr>
-                        <th>Parameter</th>
-                        <th>Value</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <tr>
-                        <td>Loop time (ms) </td>
-                        <td>{avg_time}</td>
-                    </tr>
-                    <tr>
-                        <td>Waited</td>
-                        <td>{waited}</td>
-                    </tr>
-                    <tr>
-                        <td>Leader</td>
-                        <td>{is_leader}</td>
-                    </tr>
-                    <tr>
-                        <td>Iteration</td>
-                        <td>{iteration_count}</td>
-                    </tr>
-                    </tbody>
-                </table>
-            </div>
-            <footer class="text-center mt-5">
-                <p class="text-muted">Powered by MicroPython and Microdot</p>
-            </footer>
-
         </body>
     </html>
     """
-    return Response(body=html, headers={'Content-Type': 'text/html'})
+    return Response(html, headers={'Content-Type': 'text/html'})
+
+def generate_table():
+    return f"""
+    <table class="table table-striped table-bordered">
+        <thead class="thead-dark">
+            <tr>
+                <th>Parameter</th>
+                <th>Value</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Loop time (ms)</td>
+                <td>{avg_time}</td>
+            </tr>
+            <tr>
+                <td>Waited</td>
+                <td>{waited}</td>
+            </tr>
+            <tr>
+                <td>Leader</td>
+                <td>{is_leader}</td>
+            </tr>
+            <tr>
+                <td>Iteration Count</td>
+                <td>{iteration_count}</td>
+            </tr>
+        </tbody>
+    </table>
+    """
+
+@app.route('/technical/table')
+def technical_table(request):
+    return Response(generate_table(), headers={'Content-Type': 'text/html'})
 
 @app.route('/styles.css')
 def stylesheet(request):
