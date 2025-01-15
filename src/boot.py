@@ -5,6 +5,7 @@ from machine import Pin
 import network
 import time
 import my_secrets
+import rp2
 
 # Init Wi-Fi Interface
 def init_wifi(ssid, password):
@@ -57,7 +58,8 @@ def main():
     print("wifi init....")
     if not init_wifi(my_secrets.SSID, my_secrets.PASS):
         print("Couldn't initialize wifi")
-        while True:
+        start_time = time.time()
+        while time.time() - start_time < 10:
             led1.toggle()
             time.sleep(0.5)
             led2.toggle()
