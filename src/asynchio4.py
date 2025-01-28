@@ -134,7 +134,7 @@ def index(request):
     myrate = rates.get_tail()
     if myrate is None:
        myrate = 0.
-
+    runtime = time.time() - start_time_sec
     html = """
     <!doctype html>
     <html>
@@ -259,6 +259,7 @@ def index(request):
                             document.getElementById('muon_count').innerHTML = data.muon_count;
                             document.getElementById('reset_threshold').innerHTML = data.reset_threshold;
                             document.getElementById('threshold').innerHTML = data.threshold;
+                            document.getElementById('runtime').innerHTML = data.runtime;
 
                             // Add new data point to the chart
                             const now = new Date();
@@ -402,6 +403,10 @@ def index(request):
                                 <td>Reset threshold (ADC counts)</td>
                                 <td id="reset_threshold">""" + str(reset_threshold) + """</td>
                             </tr>
+                            <tr>
+                                <td>Runtime (s)</td>
+                                <td id="runtime">""" + str(runtime) + """</td>
+                            </tr>
                         </tbody>
                     </table>
 
@@ -426,11 +431,13 @@ def data(request):
     myrate = rates.get_tail()
     if myrate is None:
        myrate = 0.
+    runtime = time.time() - start_time_sec
     return Response(body=json.dumps({
         'rate': myrate,
         'muon_count': muon_count,
         'threshold': threshold,
-        'reset_threshold': reset_threshold
+        'reset_threshold': reset_threshold,
+        'runtime': runtime
     }), headers={'Content-Type': 'application/json'})
 
 # Route to handle form submissions and update the threshold
@@ -754,6 +761,7 @@ reset_threshold = 0
 is_leader = True
 avg_time = 0.
 rates = RingBuffer.RingBuffer(120,'f')
+start_time_sec = 0
 ##################################################################
 
 ##################################################################
@@ -795,7 +803,7 @@ init_sdcard()
 
 async def main():
     global muon_count, iteration_count, rate, waited, switch_pressed, avg_time
-    global rates, threshold, reset_threshold, is_leader
+    global rates, threshold, reset_threshold, is_leader, start_time_sec
     server = asyncio.create_task(app.start_server(port=80, debug=True))
     print("main() started")
     l1t = led1.toggle
@@ -835,6 +843,7 @@ async def main():
 
     f = init_file(baseline, rms, threshold, reset_threshold, now, is_leader)
 
+    start_time_sec = time.time() # used for calculating runtime
     tmeas = time.ticks_ms
     tusleep = time.sleep_us
     start_time = tmeas()
