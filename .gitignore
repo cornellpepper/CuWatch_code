@@ -167,3 +167,6 @@ src/my_secrets.py
 src/*.mpy
 /.vscode
 .micropico
+
+src/microdot-*/**
+src/v*.tar.gz
