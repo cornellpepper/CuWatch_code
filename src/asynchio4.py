@@ -71,32 +71,46 @@ def init_RTC():
     # Get the date and time for the public IP address our node is associated with
     url = 'http://worldtimeapi.org/api/ip'
     max_retries = const(3)
+    waittime = 1
+    success = False
     for _ in range(max_retries):
-        response = urequests.get(url)
         try:
+            response = urequests.get(url)
             if response.status_code == 200:
                 rtc_time_data = json.loads(response.text)
+                success = True
+                print(f'RTC time data: {rtc_time_data}')
                 break
             else:
                 print(f'Error getting time from the internet: {response.status_code}')
-        finally:
             response.close()
-        time.sleep(1)  # Wait for 1 second before retrying
+        except ValueError as e:
+            print(f'ValueError: {e}')
+        except Exception as e:
+            print(f'Unexpected error: {e}')
+        waittime *= 2  # Exponential backoff
+        time.sleep(waittime)  # Wait before retrying
     else:
-        print('Failed to get time from the internet after 3 attempts')
-        return None
+        print(f'Failed to get time from the internet after {max_retries} attempts')
+        
+    # default to Jan 1, 2000
+    if not success:
+        dttuple = (2000, 1, 1, 0, 0, 0, 0, 0)
+        retval = "2000-01-01T00:00:00Z"
+    else:
+        dttuple = (int(rtc_time_data['datetime'][0:4]), # year
+                    int(rtc_time_data['datetime'][5:7]), # month
+                    int(rtc_time_data['datetime'][8:10]), # day
+                    int(rtc_time_data['day_of_week']), # day of week
+                    int(rtc_time_data['datetime'][11:13]), # hour
+                    int(rtc_time_data['datetime'][14:16]), # minute
+                    int(rtc_time_data['datetime'][17:19]), # second
+                    0) # subsecond, not set here
+        retval = rtc_time_data['datetime']
     # put current time into RTC
-    dttuple = (int(rtc_time_data['datetime'][0:4]), # year
-                int(rtc_time_data['datetime'][5:7]), # month
-                int(rtc_time_data['datetime'][8:10]), # day
-                int(rtc_time_data['day_of_week']), # day of week
-                int(rtc_time_data['datetime'][11:13]), # hour
-                int(rtc_time_data['datetime'][14:16]), # minute
-                int(rtc_time_data['datetime'][17:19]), # second
-                0) # subsecond, not set here
     rtc = RTC()
     rtc.datetime(dttuple)
-    return rtc_time_data['datetime']
+    return retval
 
 def init_file(baseline, rms, threshold, reset_threshold, now, is_leader) -> io.TextIOWrapper:
     """ open file for writing, with date and time in the filename. write metadata. return filehandle """

@@ -43,7 +43,7 @@ class RingBuffer:
     def calculate_average(self):
         """Calculate the average of the values in the buffer, returning a float."""
         if self.is_empty():
-            return 0.0  # Return 0.0 as a float if the buffer is empty
+            return 0.00000001  # Return small positive as a float if the buffer is empty
         items = self.get()
         return float(sum(items)) / len(items)  # Ensure the result is a float
 
