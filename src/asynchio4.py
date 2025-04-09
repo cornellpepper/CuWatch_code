@@ -9,6 +9,7 @@ import uos as os
 import gc
 import urequests
 import ujson as json
+import ntptime
 
 from micropython import const
 from microdot import Microdot, Response
@@ -17,6 +18,7 @@ import rp2
 
 import my_secrets
 import RingBuffer
+import urandom
 
 
 shutdown_request = False
@@ -67,50 +69,52 @@ def unmount_sdcard():
     print("SD card unmounted.")
 
 def init_RTC():
-    """set date and time in RTC. Assumes we are on the network."""
-    # Get the date and time for the public IP address our node is associated with
-    url = 'http://worldtimeapi.org/api/ip'
-    max_retries = const(3)
-    waittime = 1
+    """set date and time in RTC. Assumes we are on the network. Uses NTP"""
+    global led2
+    ntptime.host = 'ntp3.cornell.edu'
+    ntptime.timeout = 2
+    print(f"host is {ntptime.host}")
+    wait_time = 2
     success = False
-    for _ in range(max_retries):
-        try:
-            response = urequests.get(url)
-            if response.status_code == 200:
-                rtc_time_data = json.loads(response.text)
-                success = True
-                print(f'RTC time data: {rtc_time_data}')
-                break
-            else:
-                print(f'Error getting time from the internet: {response.status_code}')
-            response.close()
-        except ValueError as e:
-            print(f'ValueError: {e}')
-        except Exception as e:
-            print(f'Unexpected error: {e}')
-        waittime *= 2  # Exponential backoff
-        time.sleep(waittime)  # Wait before retrying
-    else:
-        print(f'Failed to get time from the internet after {max_retries} attempts')
-        
-    # default to Jan 1, 2000
-    if not success:
-        dttuple = (2000, 1, 1, 0, 0, 0, 0, 0)
-        retval = "2000-01-01T00:00:00Z"
-    else:
-        dttuple = (int(rtc_time_data['datetime'][0:4]), # year
-                    int(rtc_time_data['datetime'][5:7]), # month
-                    int(rtc_time_data['datetime'][8:10]), # day
-                    int(rtc_time_data['day_of_week']), # day of week
-                    int(rtc_time_data['datetime'][11:13]), # hour
-                    int(rtc_time_data['datetime'][14:16]), # minute
-                    int(rtc_time_data['datetime'][17:19]), # second
-                    0) # subsecond, not set here
-        retval = rtc_time_data['datetime']
-    # put current time into RTC
     rtc = RTC()
-    rtc.datetime(dttuple)
-    return retval
+    for _ in range(5):
+        print("waiting for NTP time")
+        try:
+            led2.toggle()
+            ntptime.settime()
+            # if we get here, assume it succeeded (above throws exception on fail)
+            print("NTP success: ", rtc.datetime())
+            success = True
+            break
+        except OSError as e:
+            print(f"NTP time setting failed. Check network connection. {e}")
+        except Error as e:
+            print(f"unexpected error: {e}")
+        time.sleep(wait_time)
+        wait_time = wait_time * 2
+    if not success:
+        # fall back to urequests method
+        print("NTP failed, trying worldtimeapi.org")
+        try:
+            response = urequests.get('http://worldtimeapi.org/api/ip')
+            data = response.json()
+            datetime_str = data['utc_datetime']
+            print("datetime_str: ", datetime_str)
+            year, month, day, hour, minute, second = map(int, datetime_str.split('T')[0].split('-') + datetime_str.split('T')[1].split(':'))
+            rtc.datetime((year, month, day, 0, hour, minute, second, 0))
+            success = True
+            print("RTC set to: ", rtc.datetime())
+        except Error as e:
+            print(f"Failed to set RTC time: {e}")
+    
+    print("RTC time: ", rtc.datetime())
+    if success:
+        return rtc.datetime()
+    else:
+        print("Failed to set RTC time")
+        random_hour = urandom.getrandbits(5) % 24  # Generate a random hour (0-23)
+        random_minute = urandom.getrandbits(6) % 60  # Generate a random minute (0-59)
+        return (2020, 1, 1, 0, random_hour, random_minute, 0, 0)  # Default date with random hour and minute
 
 def init_file(baseline, rms, threshold, reset_threshold, now, is_leader) -> io.TextIOWrapper:
     """ open file for writing, with date and time in the filename. write metadata. return filehandle """
