@@ -69,11 +69,10 @@ def unmount_sdcard():
     print("SD card unmounted.")
 
 def init_RTC():
-    """set date and time in RTC. Assumes we are on the network. Uses NTP"""
-    global led2
+    """set RTC to UTC. Uses NTP and falls back to worldtimeapi.org if NTP fails"""
     ntptime.host = 'ntp3.cornell.edu'
     ntptime.timeout = 2
-    print(f"host is {ntptime.host}")
+    print(f"NTP host is {ntptime.host}")
     wait_time = 2
     success = False
     rtc = RTC()
@@ -107,14 +106,26 @@ def init_RTC():
         except Error as e:
             print(f"Failed to set RTC time: {e}")
     
-    print("RTC time: ", rtc.datetime())
-    if success:
-        return rtc.datetime()
-    else:
+    if not success:
         print("Failed to set RTC time")
         random_hour = urandom.getrandbits(5) % 24  # Generate a random hour (0-23)
         random_minute = urandom.getrandbits(6) % 60  # Generate a random minute (0-59)
-        return (2020, 1, 1, 0, random_hour, random_minute, 0, 0)  # Default date with random hour and minute
+        # Set RTC to a random time on 1/1/2020
+        rtc.datetime((2020, 1, 1, 0, random_hour, random_minute, 0, 0))
+    return get_iso8601_timestamp()
+
+
+def get_iso8601_timestamp(timezone_offset="+00:00"):
+    """return RTC time as an ISO8601 string, default to UTC TZ"""
+    rtc = RTC()
+    dt = rtc.datetime()
+
+    # NOTE: no microsecond support in RTC, so we use 000000
+    timestamp = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}.{:06d}{}".format(
+        dt[0], dt[1], dt[2], dt[4], dt[5], dt[6], 0, timezone_offset
+    )
+
+    return timestamp
 
 def init_file(baseline, rms, threshold, reset_threshold, now, is_leader) -> io.TextIOWrapper:
     """ open file for writing, with date and time in the filename. write metadata. return filehandle """
