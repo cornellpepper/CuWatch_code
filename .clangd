@@ -1,0 +1,24 @@
+CompileFlags:
+  Add: [
+    -target, arm-none-eabi,
+    -mcpu=cortex-m0plus,
+    -mthumb,
+    -I../pico-sdk/include,
+    -I../pico-sdk/src/common/pico_stdlib/include,
+    -I../pico-sdk/src/boards/include,
+    -I../pico-sdk/src/rp2_common/pico_platform/include,
+    -I../pico-sdk/src/rp2_common/hardware_gpio/include,
+    -I../pico-sdk/src/rp2_common/hardware_base/include,
+    -I../pico-sdk/src/rp2_common/hardware_sync/include,
+    -I../pico-sdk/src/rp2_common/hardware_uart/include,
+    -I../pico-sdk/src/rp2_common/hardware_timer/include,
+    -I../pico-sdk/lib/cyw43-driver/include,
+    -I../pico-sdk/lib/lwip/src/include,
+    -I../pico-sdk/lib/lwip/src/include/compat/posix,
+    -I../pico-sdk/lib/lwip/src/include/compat/posix/arpa,
+    -I../pico-sdk/lib/lwip/src/include/compat/posix/net,
+    -I../pico-sdk/lib/lwip/src/include/compat/posix/sys
+  ]
+Arguments:
+  - --query-driver=/usr/bin/clang,/Applications/LLVMEmbeddedToolchainForArm-17.0.1-Darwin/bin/clang,*/arm-none-eabi-gcc
+  - --compile-commands=/Users/wittich/src/CuWatch_code/c_src/build/compile_commands.json
