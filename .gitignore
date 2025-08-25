@@ -170,3 +170,4 @@ src/*.mpy
 
 src/microdot-*/**
 src/v*.tar.gz
+src/mqtt_data.db
