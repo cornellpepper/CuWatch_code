@@ -1,11 +1,12 @@
-ARG BASE_IMAGE=python:3.9-slim
+ARG BASE_IMAGE=amqtt/amqtt
 FROM ${BASE_IMAGE}
 
 WORKDIR /app
 COPY src/test_server.py .
 
-RUN pip install hbmqtt
-
 EXPOSE 1883
+EXPOSE 9001
+EXPOSE 8883
+
 
 CMD ["python", "test_server.py"]
