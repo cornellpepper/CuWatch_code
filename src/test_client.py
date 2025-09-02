@@ -29,6 +29,7 @@ def on_message(client, userdata, msg):
 
 
 def generate_dummy_data():
+    device_number = random.randint(10,13)
     muon_count = random.randint(0, 100)
     adc_value = random.randint(0, 4095)
     temperature_adc_value = random.randint(0, 4095)
@@ -38,12 +39,13 @@ def generate_dummy_data():
     coincidence = random.choice([0, 1])
     # Create a dictionary to hold the data.
     return {
+        "device_number": 1,
         "muon_count": muon_count,
-        "adc_value": adc_value,
-        "temperature_adc_value": temperature_adc_value,
+        "adc_v": adc_value,
+        "temp_adc_v": temperature_adc_value,
         "dt": dt,
         "end_time": end_time,
-        "wait_counts": wait_counts,
+        "wait_cnt": wait_counts,
         "coincidence": coincidence
     }
 
@@ -67,7 +69,7 @@ def publish_data(client, topic):
         print(f"Error publishing data: {e}")
         return False
 
-topic = "test/event"
+topic = "telemetry/dev-001"
 
 client = mqtt.Client()
 client.on_connect = on_connect
@@ -76,7 +78,8 @@ client.on_publish = on_publish
 client.on_message = on_message
 
 # Set keepalive to detect disconnections faster
-client.connect("localhost", 1883, 10)  # 10 second keepalive
+#client.connect("localhost", 1883, 10)  # 10 second keepalive
+client.connect("10.49.72.125", 1883, 10)  # 10 second keepalive
 client.loop_start()
 
 try:
