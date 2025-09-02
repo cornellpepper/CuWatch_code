@@ -6,54 +6,53 @@ from amqtt.broker import Broker
 import sqlite3
 import json
 
-# Example AMQTT plugins configuration
-
+# Use plugin-based configuration for amqtt broker (as per latest recommendations)
 broker_config = {
-    'listeners': {
-        'default': {
-            'type': 'tcp',
-            'bind': '0.0.0.0:1883'
-        },
-        'ws': {
-            'type': 'ws',
-            'bind': '0.0.0.0:9001'
-        },
-        'secure': {
-            'type': 'tcp',
-            'bind': '0.0.0.0:8883',
-        }
-    },
-    'plugins': {
-        # Authentication plugins
-        'amqtt.plugins.authentication.AnonymousAuthPlugin': {
-            'allow_anonymous': True
-        },
-        
-        # Topic access control
-        'amqtt.plugins.topic_checking.TopicTabooPlugin': {
-        },
-        'amqtt.plugins.topic_checking.TopicAccessControlListPlugin': {
-            'acl': {
-                'anonymous': ['test/+', 'public/+'],
-                'user1': ['user1/+', 'shared/+'],
-                'admin': ['#']  # Admin can access all topics
-            }
-        },
-        
-        # System monitoring
-        'amqtt.plugins.sys.broker.BrokerSysPlugin': {
-            'sys_interval': 20
-        },
-        
-        # Logging plugins
-        'amqtt.plugins.logging_amqtt.EventLoggerPlugin': {
-        },
-        'amqtt.plugins.logging_amqtt.PacketLoggerPlugin': {
-        },
-    },
-    
-    # # # Additional broker settings
-    # # 'timeout-disconnect-delay': 2,
+'listeners': {
+'default': {
+    'type': 'tcp',
+    'bind': '0.0.0.0:1883'
+},
+'ws': {
+    'type': 'ws',
+    'bind': '0.0.0.0:9001'
+},
+'secure': {
+    'type': 'tcp',
+    'bind': '0.0.0.0:8883',
+}
+},
+'plugins': {
+# Authentication plugins
+'amqtt.plugins.authentication.AnonymousAuthPlugin': {
+    'allow_anonymous': True
+},
+
+# Topic access control
+'amqtt.plugins.topic_checking.TopicTabooPlugin': {
+},
+'amqtt.plugins.topic_checking.TopicAccessControlListPlugin': {
+    'acl': {
+        'anonymous': ['test/+', 'public/+'],
+        'user1': ['user1/+', 'shared/+'],
+        'admin': ['#']  # Admin can access all topics
+    }
+},
+
+# System monitoring
+'amqtt.plugins.sys.broker.BrokerSysPlugin': {
+    'sys_interval': 20
+},
+
+# Logging plugins
+'amqtt.plugins.logging_amqtt.EventLoggerPlugin': {
+},
+'amqtt.plugins.logging_amqtt.PacketLoggerPlugin': {
+},
+},
+
+# # # Additional broker settings
+# # 'timeout-disconnect-delay': 2,
     # # 'timeout-keep-alive': 60,
     # # 'max-connections': 50000,
     # # 'max-inflight-messages': 20,
