@@ -27,10 +27,13 @@ def on_publish(client, userdata, mid):
 def on_message(client, userdata, msg):
     print(f"Received message on topic {msg.topic}: {msg.payload.decode()}")
 
+muon_count = 0
 
 def generate_dummy_data():
+    global muon_count
     device_number = random.randint(10,13)
-    muon_count = random.randint(0, 100)
+    #muon_count = random.randint(0, 100)
+    muon_count = muon_count + 1
     adc_value = random.randint(0, 4095)
     temperature_adc_value = random.randint(0, 4095)
     dt = random.randint(0, 10)
@@ -91,7 +94,8 @@ try:
                 client.reconnect()
             except Exception as e:
                 print(f"Reconnection failed: {e}")
-        time.sleep(5)
+        sleeptime = random.randint(1,6)
+        time.sleep(sleeptime)
 except KeyboardInterrupt:
     print("Exiting...")
     client.loop_stop()
