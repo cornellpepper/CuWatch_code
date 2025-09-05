@@ -3,12 +3,16 @@ import random
 import time
 import json
 import paho.mqtt.client as mqtt
+import sys
 
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Connected successfully")
-        client.subscribe("test/topic")
+        device = userdata.get("device_number", 1)
+        topic = f"control/{device:03d}/set"
+        print(f"Subscribing to topic: {topic}")
+        client.subscribe(topic)
     else:
         print(f"Failed to connect, return code {rc}")
 
@@ -29,9 +33,8 @@ def on_message(client, userdata, msg):
 
 muon_count = 0
 
-def generate_dummy_data():
+def generate_dummy_data(device_number):
     global muon_count
-    device_number = random.randint(10,13)
     #muon_count = random.randint(0, 100)
     muon_count = muon_count + 1
     adc_value = random.randint(0, 4095)
@@ -46,7 +49,7 @@ def generate_dummy_data():
     coincidence = random.choice([0, 1])
     # Create a dictionary to hold the data.
     return {
-        "device_number": 1,
+        "device_number": device_number,
         "muon_count": muon_count,
         "adc_v": adc_value,
         "temp_adc_v": temperature_adc_value,
@@ -57,12 +60,12 @@ def generate_dummy_data():
     }
 
 # publish dummy data to a topic as JSON
-def publish_data(client, topic):
+def publish_data(client, topic, device_number):
     if not client.is_connected():
         print("Client not connected to broker!")
         return False
     
-    data = generate_dummy_data()
+    data = generate_dummy_data(device_number)
     data_json = json.dumps(data)
     try:
         result = client.publish(topic, data_json)
@@ -76,9 +79,19 @@ def publish_data(client, topic):
         print(f"Error publishing data: {e}")
         return False
 
-topic = "telemetry/dev-001"
+# Parse command line argument for device number
+device_number = 1  # default
+if len(sys.argv) > 1:
+    try:
+        device_number = int(sys.argv[1])
+    except ValueError:
+        print("Invalid device number argument, using default: 1")
+
+topic = f"telemetry/{device_number:03d}"
+userdata = {"device_number": device_number}
 
 client = mqtt.Client()
+client.user_data_set(userdata)
 client.on_connect = on_connect
 client.on_disconnect = on_disconnect
 client.on_publish = on_publish
@@ -86,19 +99,20 @@ client.on_message = on_message
 
 # Set keepalive to detect disconnections faster
 #client.connect("localhost", 1883, 10)  # 10 second keepalive
-#client.connect("10.49.72.125", 1883, 10)  # 10 second keepalive
-client.connect("192.168.4.62", 1883, 10)  # 10 second keepalive
+client.connect("10.49.72.125", 1883, 10)  # 10 second keepalive
+#client.connect("192.168.4.62", 1883, 10)  # 10 second keepalive
 client.loop_start()
 
 try:
     while True:
-        success = publish_data(client, topic)
+        success = publish_data(client, topic, device_number)
         if not success:
             print("Attempting to reconnect...")
             try:
                 client.reconnect()
             except Exception as e:
                 print(f"Reconnection failed: {e}")
+                time.sleep(2)
         sleeptime = random.randint(1,6)
         time.sleep(sleeptime)
 except KeyboardInterrupt:
