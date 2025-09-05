@@ -24,20 +24,48 @@ import urandom
 shutdown_request = False
 app = Microdot()
 
+# --- MicroPython-safe print capture for live debug log ---
+try:
+    import builtins as _bi  # CPython/MicroPython compatible
+except ImportError:
+    _bi = None
+
+DEBUG_LOG = []
+MAX_LOG_LINES = const(220)  # cap memory use
+
+if _bi is not None and hasattr(_bi, 'print'):
+    _ORIG_PRINT = _bi.print
+    def _tee_print(*args, **kwargs):
+        # Always call original print first
+        try:
+            _ORIG_PRINT(*args, **kwargs)
+        finally:
+            # Then capture into memory buffer
+            try:
+                sep = kwargs.get('sep', ' ')
+                end = kwargs.get('end', '\n')
+                s = sep.join([str(a) for a in args]) + end
+                DEBUG_LOG.append(s)
+                if len(DEBUG_LOG) > MAX_LOG_LINES:
+                    del DEBUG_LOG[: len(DEBUG_LOG) - MAX_LOG_LINES]
+            except Exception:
+                pass
+    _bi.print = _tee_print
 
 @micropython.native
-async def calibrate_average_rms(n: int) -> tuple:
+def calibrate_average_rms(n: int) -> tuple:
     """calibrate the threshold value by taking the average of n samples. Assumes no muons are present"""
     led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
     adc = ADC(0)  # Pin 26 is GP26, which is ADC0
     sumval = 0
     sum_squared = 0
+    print("Calibrating with", n, "samples...")
     for _ in range(n):
         value = adc.read_u16()
         sumval += value
         sum_squared += value ** 2
         led2.toggle()
-        await asyncio.sleep_ms(10) # wait 
+        time.sleep_ms(10) # wait 
     mean = sumval / n
     variance = (sum_squared / n) - (mean ** 2)
     standard_deviation = variance ** 0.5
@@ -47,7 +75,7 @@ async def calibrate_average_rms(n: int) -> tuple:
 
 def init_sdcard():
     """ Initialize the SD card interface on the base board"""
-# Define SPI pins -- see schematic for Pepper V2 board
+    # Define SPI pins -- see schematic for Pepper V2 board
     spi = machine.SPI(0, sck=machine.Pin(2), mosi=machine.Pin(3), miso=machine.Pin(0))
     cs = machine.Pin(1, machine.Pin.OUT)  # Chip select pin
 
@@ -70,12 +98,15 @@ def unmount_sdcard():
 
 def init_RTC():
     """set RTC to UTC. Uses NTP and falls back to worldtimeapi.org if NTP fails"""
-    ntptime.host = 'ntp3.cornell.edu'
+    import random
+    server = random.choice(['0.pool.ntp.org', '1.pool.ntp.org', '2.pool.ntp.org', '3.pool.ntp.org'])
+    ntptime.host = server
     ntptime.timeout = 2
     print(f"NTP host is {ntptime.host}")
     wait_time = 2
     success = False
     rtc = RTC()
+    led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
     for _ in range(5):
         print("waiting for NTP time")
         try:
@@ -156,303 +187,89 @@ Response.default_content_type = 'text/html'
 # Path to the SD card directory where CSV files are located
 SD_DIRECTORY = '/sd'
 
-## Main route that serves the form, graph, and global variables
-@app.route('/', methods=['GET'])
-def index(request):
-    """Main route that serves the form, graph, and global variables"""
-    myrate = rates.get_tail()
-    if myrate is None:
-       myrate = 0.
-    runtime = time.time() - start_time_sec
-    html = """
+
+# Streamed HTML generator for the home page (keeps memory usage low)
+def _index_stream(myrate, muon_count, threshold, reset_threshold, runtime):
+    yield """
     <!doctype html>
     <html>
-        <head>
-            <title>CuWatch</title>
-            <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-            <link rel="stylesheet" href="/styles.css">
-            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-            <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>  <!-- Include date adapter -->
-            <script>
-                function displayTime() {
-                    let now = new Date();
-                    document.getElementById('time').innerHTML = now.toLocaleTimeString();
-                }
-                setInterval(displayTime, 1000);  // Update time every second
-
-                // Function to load graph data from local storage
-                function loadGraphData(chart) {
-                    const savedLabels = JSON.parse(localStorage.getItem('rateLabels'));
-                    const savedData = JSON.parse(localStorage.getItem('rateData'));
-                    if (savedLabels && savedData) {
-                        chart.data.labels = savedLabels;
-                        chart.data.datasets[0].data = savedData;
-                        chart.update();
-                    }
-                }
-
-                // Function to save graph data to local storage
-                function saveGraphData(chart) {
-                    localStorage.setItem('rateLabels', JSON.stringify(chart.data.labels));
-                    localStorage.setItem('rateData', JSON.stringify(chart.data.datasets[0].data));
-                }
-
-                // Initialize chart for rate vs. time
-                let rateChart;
-                window.onload = function() {
-                    const ctx = document.getElementById('rateChart').getContext('2d');
-                    rateChart = new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            labels: [],  // Time labels
-                            datasets: [{
-                                label: 'Rate vs Time',
-                                data: [],
-                                borderColor: 'rgba(75, 192, 192, 1)',
-                                borderWidth: 2,
-                                fill: false
-                            }]
-                        },
-                        options: {
-                            responsive: true,  // Make the chart responsive
-                            maintainAspectRatio: true,  // Allow the chart to adjust its aspect ratio
-                            layout: {
-                                padding: {
-                                    bottom: 30  // Add padding to the bottom of the chart
-                                }
-                            },
-                            scales: {
-                                x: {
-                                    type: 'time',  // Use time scale
-                                    time: {
-                                        unit: 'second'
-                                    },
-                                    ticks: {
-                                        source: 'auto'
-                                    },
-                                    min: function () {
-                                        // Limit to last 1 hour
-                                        const now = new Date();
-                                        return new Date(now.getTime() - 60 * 60 * 1000); // 1 hour ago
-                                    }
-                                },
-                                y: {
-                                    beginAtZero: true
-                                }
-                            }
-                        }
-                    });
-
-                    // Load graph data from local storage after initializing the chart
-                    loadGraphData(rateChart);
-                }
-
-                // Function to fetch historical data from the server
-                function fetchHistoricalData() {
-                    fetch('/refresh_data')
-                        .then(response => response.json())
-                        .then(data => {
-                            // Update chart with historical data
-                            const now = new Date();
-
-                            // Clear existing data
-                            rateChart.data.labels = [];
-                            rateChart.data.datasets[0].data = [];
-
-                            // Add historical data to the chart
-                            data.forEach((rate, index) => {
-                                // Calculate the timestamp for each data point
-                                const timestamp = new Date(now.getTime() - index * 30 * 1000); // 30 seconds apart
-                                rateChart.data.labels.unshift(timestamp); // Add the timestamp
-                                rateChart.data.datasets[0].data.unshift(rate); // Add the rate
-                            });
-
-                            // Update the chart
-                            rateChart.update();
-
-                            // Save graph data to local storage
-                            saveGraphData(rateChart);
-                        })
-                        .catch(error => {
-                            console.error('Error fetching historical data:', error);
-                        });
-                }
-
-
-                // Fetch updated rate, muon_count, iteration_count every 30 seconds
-                function fetchData() {
-                    fetch('/data')
-                        .then(response => response.json())
-                        .then(data => {
-                            document.getElementById('rate').innerHTML = data.rate;
-                            document.getElementById('muon_count').innerHTML = data.muon_count;
-                            document.getElementById('reset_threshold').innerHTML = data.reset_threshold;
-                            document.getElementById('threshold').innerHTML = data.threshold;
-                            document.getElementById('runtime').innerHTML = data.runtime;
-
-                            // Add new data point to the chart
-                            const now = new Date();
-                            rateChart.data.labels.push(now);
-                            rateChart.data.datasets[0].data.push(data.rate);
-
-                            // Remove data older than 1 hour
-                            const limit = new Date(now.getTime() - 60 * 60 * 1000); // 1 hour ago
-                            while (rateChart.data.labels.length > 0 && rateChart.data.labels[0] < limit) {
-                                rateChart.data.labels.shift();  // Remove old labels
-                                rateChart.data.datasets[0].data.shift();  // Remove corresponding data
-                            }
-
-                            // Update the chart and save it to local storage
-                            rateChart.update();
-                            saveGraphData(rateChart);
-                        });
-                }
-                // Function to handle button click to invoke a method on the microcontroller
-                function invokeMicrocontrollerMethod() {
-                    fetch('/request-shutdown', { method: 'POST' })
-                        .then(response => response.json())
-                        .then(data => {
-                            console.log('Method invoked:', data);
-                        })
-                        .catch(error => {
-                            console.error('Error invoking method:', error);
-                        });
-                }
-                // Function to handle button click to invoke a method on the microcontroller
-                function restartRequest() {
-                    fetch('/request-restart', { method: 'POST' })
-                        .then(response => response.json())
-                        .then(data => {
-                            console.log('Method invoked:', data);
-                        })
-                        .catch(error => {
-                            console.error('Error invoking method:', error);
-                        });
-                }
-                function updateThreshold() {
-                    // Retrieve the new threshold value from the input field
-                    const newThreshold = document.getElementById('thresholdInput').value;
-
-                    // Validate the input
-                    if (newThreshold === '') {
-                        alert('Please enter a valid threshold.');
-                        return;
-                    }
-
-                    // Create an XMLHttpRequest object
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('POST', '/submit', true);
-                    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-
-                    // Define a callback function to handle the server's response
-                    xhr.onreadystatechange = function() {
-                        if (xhr.readyState === XMLHttpRequest.DONE) {
-                            if (xhr.status === 200) {
-                                console.log('Threshold updated successfully!');
-                            } else {
-                                alert('Failed to update threshold.');
-                            }
-                        }
-                    };
-
-                    // Send the request with the threshold data
-                    xhr.send('threshold=' + encodeURIComponent(newThreshold));
-                }
-
-
-                setInterval(fetchData, 30000);  // Update every 30 seconds
-
-                // Add event listener for visibility change
-                document.addEventListener('visibilitychange', () => {
-                    if (document.visibilityState === 'visible') {
-                        console.log('Window focused, reloading historical data...');
-                        fetchHistoricalData(); // Fetch historical data from the server
-                    }
-                });
-
-            </script>
-            <style>
-                #rateChart {
-                    width: 100%;  /* Make the canvas take the full width of its container */
-                    height: auto; /* Maintain the aspect ratio */
-                }
-            </style>
-        </head>
-        <body class="bg-light">
-            <div class="d-flex">
-                <div class="sidebar">
-                    <h2 class="text-center">CuWatch</h2>
-                    <ul class="nav flex-column">
-                        <li class="nav-item">
-                            <a class="nav-link active" href="/">Home</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="/download">Download Data</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="/technical">Technical</a>
-                        </li>
-                        <li class="nav-item">
-                            <button class="btn btn-secondary" onclick="invokeMicrocontrollerMethod()">Stop Run</button>
-                        </li>
-                        <li class="nav-item">
-                            <button class="btn btn-secondary" onclick="restartRequest()">Restart Run</button>
-                        </li>
-                        <li class="nav-item">
-                            <input type="number" id="thresholdInput" class="form-control" placeholder="Enter new threshold">
-                            <button class="btn btn-primary mt-2" onclick="updateThreshold()">Update Threshold</button>
-                        </li>
-                    </ul>
-                    <p id="time" class="text-center mt-4"></p>
-                </div>
-                <div class="content">
-                        <h1 class="my-4 text-center">CuWatch Status and Configuration</h1>
-                    <!-- Display global variables in a Bootstrap table -->
-                    <table class="table table-striped table-bordered">
-                        <thead class="thead-dark">
-                            <tr>
-                                <th>Variable</th>
-                                <th>Value</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>Rate (Hz)</td>
-                                <td id="rate">""" + str(myrate) + """</td>
-                            </tr>
-                            <tr>
-                                <td>Muon Count</td>
-                                <td id="muon_count">""" + str(muon_count) + """</td>
-                            </tr>
-                            <tr>
-                                <td>Threshold (ADC counts)</td>
-                                <td id="threshold">""" + str(threshold) + """</td>
-                            </tr>
-                            <tr>
-                                <td>Reset threshold (ADC counts)</td>
-                                <td id="reset_threshold">""" + str(reset_threshold) + """</td>
-                            </tr>
-                            <tr>
-                                <td>Runtime (s)</td>
-                                <td id="runtime">""" + str(runtime) + """</td>
-                            </tr>
-                        </tbody>
-                    </table>
-
-                    <!-- Chart.js graph for Rate vs Time -->
-                    <h3 class="my-4 text-center">Rate vs Time</h3>
-                    <canvas id="rateChart"></canvas>
-                    
-                </div>
-            </div>
-            <footer class="text-center mt-5">
-                <p class="text-muted">Powered by MicroPython and Microdot</p>
-            </footer>
-        </body>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>CuWatch</title>
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+        <link rel="stylesheet" href="/styles.css">
+      </head>
+      <body class="bg-light">
+        <div class="d-flex">
+          <div class="sidebar">
+            <h2 class="text-center">CuWatch</h2>
+            <ul class="nav flex-column">
+              <li class="nav-item"><a class="nav-link active" href="/">Home</a></li>
+              <li class="nav-item"><a class="nav-link" href="/download">Download Data</a></li>
+              <li class="nav-item"><a class="nav-link" href="/technical">Technical</a></li>
+              <li class="nav-item"><button class="btn btn-secondary" onclick="invokeMicrocontrollerMethod()">Stop Run</button></li>
+              <li class="nav-item"><button class="btn btn-secondary" onclick="restartRequest()">Restart Run</button></li>
+              <li class="nav-item">
+                <input type="number" id="thresholdInput" class="form-control" placeholder="Enter new threshold">
+                <button class="btn btn-primary mt-2" onclick="updateThreshold()">Update Threshold</button>
+              </li>
+            </ul>
+            <p id="time" class="text-center mt-4"></p>
+          </div>
+          <div class="content">
+            <h1 class="my-4 text-center">CuWatch Status and Configuration</h1>
+            <table class="table table-striped table-bordered">
+              <thead class="thead-dark">
+                <tr><th>Variable</th><th>Value</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Rate (Hz)</td><td id="rate">"""
+    yield str(myrate)
+    yield """</td></tr>
+                <tr><td>Muon Count</td><td id="muon_count">"""
+    yield str(muon_count)
+    yield """</td></tr>
+                <tr><td>Threshold (ADC counts)</td><td id="threshold">"""
+    yield str(threshold)
+    yield """</td></tr>
+                <tr><td>Reset threshold (ADC counts)</td><td id="reset_threshold">"""
+    yield str(reset_threshold)
+    yield """</td></tr>
+                <tr><td>Runtime (s)</td><td id="runtime">"""
+    yield str(runtime)
+    yield """</td></tr>
+              </tbody>
+            </table>
+            <p id="last_updated" class="text-muted small text-right mb-0">Last updated: —</p>
+            <h3 class="my-4 text-center">Rate vs Time</h3>
+            <canvas id="rateChart"></canvas>
+          </div>
+        </div>
+        <footer class="text-center mt-5"><p class="text-muted">Powered by MicroPython and Microdot</p></footer>
+        <script src="/boot.js?v=1"></script>
+      </body>
     </html>
     """
-    return Response(body=html, headers={'Content-Type': 'text/html'})
 
+@app.route('/', methods=['GET'])
+def index(request):
+    """Main route: streamed to lower peak memory and move JS to /app.js"""
+    myrate = rates.get_tail()
+    if myrate is None:
+        myrate = 0.
+    runtime = time.time() - start_time_sec
+    return Response(body=_index_stream(myrate, muon_count, threshold, reset_threshold, runtime),
+                    headers={'Content-Type': 'text/html', 'Cache-Control': 'no-cache'})
+
+@app.before_request
+def _log_request(request):
+    try:
+        print("REQ", request.method, request.path)
+        global last_req_ms
+        last_req_ms = time.ticks_ms()
+    except Exception:
+        pass
 # API route to return dynamic data (rate, muon_count, iteration_count)
 @app.route('/data', methods=['GET'])
 def data(request):
@@ -469,13 +286,23 @@ def data(request):
         'runtime': runtime
     }), headers={'Content-Type': 'application/json'})
 
+# Lightweight health endpoint: if this responds, the server is active
+@app.route('/healthz', methods=['GET'])
+def healthz(request):
+    return Response(body='ok', headers={'Content-Type': 'text/plain'})
+
 # Route to handle form submissions and update the threshold
 @app.route('/submit', methods=['POST'])
 def submit(request):
     global threshold
     try:
         # Update the threshold
-        threshold = int(request.form['threshold'])  # Convert to integer
+        new_value = int(request.form['threshold'])  # Convert to integer
+        if new_value < 0:
+            new_value = 0
+        elif new_value > 65535:
+            new_value = 65535
+        threshold = new_value
         
         # Redirect to the main page to avoid form resubmission prompt
         return Response.redirect('/')
@@ -484,18 +311,18 @@ def submit(request):
 
 # Route to handle shutdown request
 @app.route('/request-shutdown', methods=['POST'])
-def request_shutdown(request):
+async def request_shutdown(request):
     global shutdown_request
     shutdown_request = True
     return {"status": "Shutdown request sent"}
 
 # Route to handle restart request
 @app.route('/request-restart', methods=['POST'])
-def request_restart(request):
+async def request_restart(request):
     global restart_request
     restart_request = True
-    await app.shutdown()
-    return {"status": "Reset request sent"}
+    # Do not call app.shutdown() here; let the main loop handle a graceful stop
+    return {"status": "Reset request queued"}
 
 # route to handle make-leader request
 @app.route('/make-leader', methods=['POST'])
@@ -538,16 +365,42 @@ def join_path(directory, filename):
 @app.route('/download', methods=['GET'])
 def download_page(request):
     files = []
-    file_limit = 50
+    FILE_LIMIT = const(30)
     filecount = 0
 
     # Get list of .csv files in the /sd directory
     try:
         if os.stat(SD_DIRECTORY):  # Check if directory exists
-            files = [f for f in os.listdir(SD_DIRECTORY) if f.endswith('.csv')]
-            filecount = len(files)
-            # limit to last 50 files. These appear to be the most recent ones
-            files = files[-file_limit:]
+            ring = []
+            # Prefer iterator on MicroPython to avoid a large list
+            if hasattr(os, 'ilistdir'):
+                for entry in os.ilistdir(SD_DIRECTORY):
+                    try:
+                        name = entry[0] if isinstance(entry, tuple) else entry
+                    except Exception:
+                        name = entry
+                    if isinstance(name, bytes):
+                        try:
+                            name = name.decode()
+                        except Exception:
+                            name = str(name)
+                    if isinstance(name, str) and name.endswith('.csv'):
+                        filecount += 1
+                        ring.append(name)
+                        if len(ring) > FILE_LIMIT:
+                            del ring[0]
+            else:
+                try:
+                    names = os.listdir(SD_DIRECTORY)
+                except Exception:
+                    names = []
+                for name in names:
+                    if name.endswith('.csv'):
+                        filecount += 1
+                        ring.append(name)
+                        if len(ring) > FILE_LIMIT:
+                            del ring[0]
+            files = ring
         # Sort files by modification time (most recent first). This does not work
         # as it requires too much memory when the list of files gets long
         #files = sorted(files, key=lambda x: get_file_mtime(join_path(SD_DIRECTORY, x)), reverse=True)
@@ -556,35 +409,17 @@ def download_page(request):
     # 
     gc.collect()
 
-    # Generate HTML for displaying the list of files with download links
-    file_list_html = '<ul class="list-group">'
-    for file in files[::-1]: # reverse the list to show most recent first
-        file_list_html += f'<li class="list-group-item"><a href="/download_file?file={file}">{file}</a></li>'
-    file_list_html += "</ul>"
-
-    html = f"""
-    <!doctype html>
-    <html>
-        <head>
-            <title>Download CSV Files</title>
-            <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-            <link rel="stylesheet" href="/styles.css">
-        </head>
-        <body class="bg-light">
-            <div class="container">
-                <h1 class="my-4 text-center">Download CSV Files</h1>
-                <div class="btn-group" role="group" aria-label="Navigation Link">
-                    <button type="button" class="btn btn-primary" onclick="window.location.href='/'">Return home</button>
-                </div>
-
-                <h3 class="my-4 text-center">Total number of files (showing {file_limit}): {filecount}</h3>
-                {file_list_html}
-                <a href="/">Back to Home</a>
-            </div>
-        </body>
-    </html>
-    """
-    return Response(body=html, headers={'Content-Type': 'text/html'})
+    # Stream HTML to reduce memory usage
+    def _stream():
+        yield "<!doctype html>\n<html>\n  <head>\n    <title>Download CSV Files</title>\n"
+        yield "    <link rel=\"stylesheet\" href=\"https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css\">\n"
+        yield "    <link rel=\"stylesheet\" href=\"/styles.css\">\n  </head>\n  <body class=\"bg-light\">\n    <div class=\"container\">\n      <h1 class=\"my-4 text-center\">Download CSV Files</h1>\n      <div class=\"btn-group\" role=\"group\" aria-label=\"Navigation Link\">\n        <button type=\"button\" class=\"btn btn-primary\" onclick=\"window.location.href='/'\">Return home</button>\n      </div>\n"
+        yield "      <h3 class=\"my-4 text-center\">Total number of files (showing %d): %d</h3>\n" % (FILE_LIMIT, filecount)
+        yield "      <ul class=\"list-group\">\n"
+        for fname in files[::-1]:
+            yield "        <li class=\"list-group-item\"><a href=\"/download_file?file=%s\">%s</a></li>\n" % (fname, fname)
+        yield "      </ul>\n      <a href=\"/\">Back to Home</a>\n    </div>\n  </body>\n</html>\n"
+    return Response(body=_stream(), headers={'Content-Type': 'text/html'})
 
 # Helper function to stream file content in chunks
 def file_stream_generator(file_path, chunk_size=512):
@@ -603,9 +438,9 @@ def download_file(request):
     file_name = request.args.get('file')
     file_path = join_path(SD_DIRECTORY, file_name)
     try:
-        if os.stat(file_path) and file_name.endswith('.csv'):
-            # Check if the file has non-zero length
-            if os.stat(file_path)[6] > 0:  # `st_size` is the 7th element in the tuple (index 6)
+        st = os.stat(file_path)
+        if st and file_name.endswith('.csv'): # Check if the file has non-zero length
+            if st[6] > 0:  # `st_size` is the 7th element in the tuple (index 6)
                 # Stream the file content using the generator function
                 return Response(body=file_stream_generator(file_path), headers={
                     'Content-Type': 'text/csv',
@@ -618,96 +453,29 @@ def download_file(request):
 
 @app.route('/technical')
 def technical_page(request):
-    javascript = """
-    <script>
-        function displayTime() {
-        let now = new Date();
-        document.getElementById('time').innerHTML = now.toLocaleTimeString();
-    }
-    setInterval(displayTime, 1000);  // Update time every second
-
-    function makeLeader() {
-        fetch('/make-leader', { method: 'POST' })
-            .then(response => response.json())
-            .then(data => {
-                console.log('Make Leader invoked:', data);
-                reloadTable(); // Reload the table after making leader
-            })
-            .catch(error => {
-                console.error('Error invoking Make Leader:', error);
-            });
-    }
-
-    function makeFollower() {
-        fetch('/make-follower', { method: 'POST' })
-            .then(response => response.json())
-            .then(data => {
-                console.log('Make Follower invoked:', data);
-                reloadTable(); // Reload the table after making follower
-            })
-            .catch(error => {
-                console.error('Error invoking Make Follower:', error);
-            });
-    }
-
-    function reloadTable() {
-        fetch('/technical/table')
-            .then(response => response.text())
-            .then(html => {
-                document.getElementById('table-container').innerHTML = html;
-            })
-            .catch(error => {
-                console.error('Error reloading table:', error);
-            });
-    }
-    </script>
-    """
-    html = f"""
-    <!doctype html>
-    <html>
-        <head>
-            <title>CuWatch Technical Information</title>
-            <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-            <link rel="stylesheet" href="/styles.css">
-            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Include Chart.js for time -->
-            <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>  <!-- Include date adapter -->
-            {javascript}
-        </head>
-        <body class="bg-light">
-            <div class="d-flex">
-                <div class="sidebar bg-light p-3">
-                    <h2 class="text-center">CuWatch</h2>
-                    <ul class="nav flex-column">
-                        <li class="nav-item">
-                            <a class="nav-link active" href="/">Home</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="/download">Download Data</a>
-                        </li>
-                        <li class="nav-item">
-                            <button class="btn btn-secondary my-2" onclick="makeLeader()">Make Leader</button>
-                        </li>
-                        <li class="nav-item">
-                            <button class="btn btn-secondary my-2" onclick="makeFollower()">Make Follower</button>
-                        </li>
-                    </ul>
-                    <div class="static-text bg-secondary text-white p-3 rounded mt-3">
-                        <p>Leader and follower changes take effect on next new run.</p>
-                    </div>
-                    <p id="time" class="text-center mt-4"></p>
-                </div>
-                <div class="content flex-grow-1 p-3">
-                    <h1 class="my-4 text-center">CuWatch Technical Information</h1>
-                    <div id="table-container">
-                        {generate_table()}
-                    </div>
-                    {javascript}
-                </div>
-            </div>
-        </body>
-    </html>
-    """
-    return Response(html, headers={'Content-Type': 'text/html'})
+    # Streamed version to avoid MemoryError on large f-strings
+    def _stream():
+        yield "<!doctype html>\n<html>\n  <head>\n    <title>CuWatch Technical Information</title>\n"
+        yield "    <link rel=\"stylesheet\" href=\"https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css\">\n"
+        yield "    <link rel=\"stylesheet\" href=\"/styles.css\">\n"
+        yield "    <script>\n"
+        yield "      function displayTime(){var now=new Date();var e=document.getElementById('time'); if(e){e.textContent=now.toLocaleTimeString();}}\n"
+        yield "      setInterval(displayTime,1000);\n"
+        yield "      function makeLeader(){fetch('/make-leader',{method:'POST'}).then(r=>r.json()).then(_=>reloadTable()).catch(()=>{});}\n"
+        yield "      function makeFollower(){fetch('/make-follower',{method:'POST'}).then(r=>r.json()).then(_=>reloadTable()).catch(()=>{});}\n"
+        yield "      function reloadTable(){fetch('/technical/table').then(r=>r.text()).then(function(h){var t=document.getElementById('table-container'); if(t){t.innerHTML=h;}}).catch(()=>{});}\n"
+        yield "    </script>\n  </head>\n  <body class=\"bg-light\">\n    <div class=\"d-flex\">\n      <div class=\"sidebar bg-light p-3\">\n        <h2 class=\"text-center\">CuWatch</h2>\n        <ul class=\"nav flex-column\">\n"
+        yield "          <li class=\"nav-item\"><a class=\"nav-link active\" href=\"/\">Home</a></li>\n"
+        yield "          <li class=\"nav-item\"><a class=\"nav-link\" href=\"/download\">Download Data</a></li>\n"
+        yield "          <li class=\"nav-item\"><button class=\"btn btn-secondary my-2\" onclick=\"makeLeader()\">Make Leader</button></li>\n"
+        yield "          <li class=\"nav-item\"><button class=\"btn btn-secondary my-2\" onclick=\"makeFollower()\">Make Follower</button></li>\n"
+        yield "        </ul>\n        <div class=\"static-text bg-secondary text-white p-3 rounded mt-3\">\n          <p>Leader and follower changes take effect on next new run.</p>\n        </div>\n        <p id=\"time\" class=\"text-center mt-4\"></p>\n      </div>\n      <div class=\"content flex-grow-1 p-3\">\n        <h1 class=\"my-4 text-center\">CuWatch Technical Information</h1>\n        <div id=\"table-container\">\n"
+        try:
+            yield generate_table()
+        except Exception:
+            yield "<p>Error loading table.</p>"
+        yield "        </div>\n      </div>\n    </div>\n  </body>\n</html>\n"
+    return Response(body=_stream(), headers={'Content-Type': 'text/html'})
 
 def generate_table():
     return f"""
@@ -743,14 +511,198 @@ def generate_table():
 def technical_table(request):
     return Response(generate_table(), headers={'Content-Type': 'text/html'})
 
+
 @app.route('/styles.css')
 def stylesheet(request):
     try:
         with open('styles.css', 'r') as f:
             css_content = f.read()
-        return Response(body=css_content, headers={'Content-Type': 'text/css'})
+            return Response(body=css_content, 
+                headers={'Content-Type': 'text/css', 'Cache-Control': 'max-age=604800'})
     except OSError:
         return Response('/* Stylesheet not found */', headers={'Content-Type': 'text/css'})
+
+
+# --- Debug log viewer routes ---
+@app.route('/debug')
+def debug_page(request):
+    # Stream HTML to minimize single large allocations
+    def _stream():
+        yield "<!doctype html>\n<html>\n  <head>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n    <title>CuWatch Debug Log</title>\n"
+        yield "    <link rel=\"stylesheet\" href=\"https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css\">\n"
+        yield "    <style>body{background:#f7f9fc}.wrap{max-width:960px;margin:20px auto}pre{background:#111;color:#0f0;padding:12px;border-radius:6px;height:60vh;overflow:auto}.controls{display:flex;gap:8px;align-items:center}</style>\n  </head>\n  <body class=\"bg-light\">\n    <div class=\"wrap\">\n      <div class=\"d-flex justify-content-between align-items-center mb-2\">\n        <h3 class=\"mb-0\">Debug Log</h3>\n        <div class=\"controls\">\n          <button class=\"btn btn-sm btn-secondary\" id=\"clearBtn\">Clear</button>\n          <label class=\"mb-0\"><input type=\"checkbox\" id=\"follow\" checked> Follow</label>\n        </div>\n      </div>\n      <pre id=\"log\">Loading…</pre>\n      <p class=\"text-muted small\">Updates every 10 seconds. Shows last 200 lines.</p>\n      <a href=\"/\" class=\"btn btn-link p-0\">Back to Home</a>\n    </div>\n    <script>\n"
+        yield "(function(){var pre=document.getElementById('log');var follow=document.getElementById('follow');function fetchLog(){fetch('/debug/log').then(function(r){return r.text();}).then(function(t){var atBottom=(pre.scrollTop+pre.clientHeight)>=(pre.scrollHeight-8);pre.textContent=t||'';if(follow&&follow.checked&&atBottom){pre.scrollTop=pre.scrollHeight;}}).catch(function(e){});}setInterval(fetchLog,10000);fetchLog();var c=document.getElementById('clearBtn');if(c){c.onclick=function(){fetch('/debug/clear',{method:'POST'}).then(fetchLog);};}})();\n"
+        yield "    </script>\n  </body>\n</html>\n"
+    return Response(body=_stream(), headers={'Content-Type': 'text/html', 'Cache-Control': 'no-cache'})
+
+
+@app.route('/debug/log')
+def debug_log(request):
+    def _stream():
+        try:
+            n = len(DEBUG_LOG)
+            start = 0 if n <= 200 else n - 200
+            i = start
+            while i < n:
+                s = DEBUG_LOG[i]
+                # Yield the stored string, add a newline if missing
+                yield s
+                if not s.endswith('\n'):
+                    yield '\n'
+                i += 1
+        except Exception:
+            # In case of any issue, yield nothing further
+            if False:
+                yield ''
+    return Response(body=_stream(), headers={'Content-Type': 'text/plain', 'Cache-Control': 'no-cache'})
+
+
+@app.route('/debug/clear', methods=['POST'])
+def debug_clear(request):
+    try:
+        DEBUG_LOG.clear()
+    except Exception:
+        pass
+    return Response(body='ok', headers={'Content-Type': 'text/plain', 'Cache-Control': 'no-cache'})
+
+
+# Serve a lightweight bootstrap JS that defers loading of app.js
+@app.route('/boot.js')
+def boot_js(request):
+    js = """
+    (function(){
+      function displayTime(){
+        var now=new Date();
+        var el=document.getElementById('time');
+        if(el){ el.textContent=now.toLocaleTimeString(); }
+      }
+      setInterval(displayTime,1000);
+
+      // Lightweight initial populate so the page shows data fast
+      function populateOnce(){
+        fetch('/data').then(r=>r.json()).then(function(d){
+          var set=function(id,v){var e=document.getElementById(id); if(e){ e.textContent=v; }};
+          set('rate', d.rate); set('muon_count', d.muon_count); set('threshold', d.threshold);
+          set('reset_threshold', d.reset_threshold); set('runtime', d.runtime);
+          var lu=document.getElementById('last_updated');
+          if(lu){ lu.textContent='Last updated: '+(new Date()).toLocaleTimeString(); }
+        }).catch(function(e){console.log('boot populate err', e);});
+      }
+
+      // Basic button handlers available immediately
+      window.invokeMicrocontrollerMethod=function(){
+        fetch('/request-shutdown',{method:'POST'}).then(r=>r.json()).catch(function(e){console.log(e);});
+      };
+      window.restartRequest=function(){
+        fetch('/request-restart',{method:'POST'}).then(r=>r.json()).catch(function(e){console.log(e);});
+      };
+      window.updateThreshold=function(){
+        var v=document.getElementById('thresholdInput'); if(!v||!v.value){alert('Enter threshold'); return;}
+        var xhr=new XMLHttpRequest(); xhr.open('POST','/submit',true);
+        xhr.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+        xhr.onreadystatechange=function(){ if(xhr.readyState===4 && xhr.status!==200){ alert('Failed to update threshold'); } };
+        xhr.send('threshold='+encodeURIComponent(v.value));
+      };
+
+      // Defer loading of heavier logic
+      function loadAppJs(){
+        var s=document.createElement('script'); s.src='/app.js?v=1'; s.defer=true; document.head.appendChild(s);
+      }
+
+      window.addEventListener('load', function(){ populateOnce(); loadAppJs(); });
+    })();
+    """
+    return Response(body=js, headers={'Content-Type':'application/javascript','Cache-Control':'max-age=604800'})
+
+
+# Serve the main JS as a static resource (charts, periodic updates, lazy loads Chart.js)
+@app.route('/app.js')
+def app_js(request):
+    js = """
+    (function(){
+      function loadScript(src){
+        return new Promise(function(resolve, reject){
+          var s=document.createElement('script'); s.src=src; s.onload=resolve; s.onerror=reject; document.head.appendChild(s);
+        });
+      }
+
+      var rateChart;
+      function initChart(){
+        var canvas=document.getElementById('rateChart');
+        if(!canvas){ return; }
+        var ctx=canvas.getContext('2d');
+        rateChart=new Chart(ctx,{
+          type:'line',
+          data:{labels:[],datasets:[{label:'Rate vs Time',data:[],borderWidth:2,fill:false}]},
+          options:{responsive:true,maintainAspectRatio:true,scales:{x:{type:'time',time:{unit:'second'}},y:{beginAtZero:true}}}
+        });
+      }
+
+      function saveGraphData(){
+        try{
+          localStorage.setItem('rateLabels',JSON.stringify(rateChart.data.labels));
+          localStorage.setItem('rateData',JSON.stringify(rateChart.data.datasets[0].data));
+        }catch(e){}
+      }
+      function loadGraphData(){
+        try{
+          var a=JSON.parse(localStorage.getItem('rateLabels')||'null');
+          var b=JSON.parse(localStorage.getItem('rateData')||'null');
+          if(a&&b&&rateChart){ rateChart.data.labels=a; rateChart.data.datasets[0].data=b; rateChart.update(); }
+        }catch(e){}
+      }
+
+      function fetchHistoricalData(){
+        fetch('/refresh_data').then(r=>r.json()).then(function(data){
+          var now=new Date();
+          rateChart.data.labels=[]; rateChart.data.datasets[0].data=[];
+          for(var i=0;i<data.length;i++){
+            var ts=new Date(now.getTime()-i*30000);
+            rateChart.data.labels.unshift(ts);
+            rateChart.data.datasets[0].data.unshift(data[i]);
+          }
+          rateChart.update(); saveGraphData();
+        }).catch(function(e){console.log('hist err',e);});
+      }
+
+      function fetchData(){
+        fetch('/data').then(r=>r.json()).then(function(d){
+          var now=new Date();
+          var set=function(id,v){var e=document.getElementById(id); if(e){ e.textContent=v; }};
+          set('rate', d.rate); set('muon_count', d.muon_count); set('threshold', d.threshold);
+          set('reset_threshold', d.reset_threshold); set('runtime', d.runtime);
+          var lu=document.getElementById('last_updated');
+          if(lu){ lu.textContent='Last updated: '+now.toLocaleTimeString(); }
+          if(rateChart){
+            rateChart.data.labels.push(now);
+            rateChart.data.datasets[0].data.push(d.rate);
+            var limit=new Date(now.getTime()-3600*1000);
+            while(rateChart.data.labels.length>0 && rateChart.data.labels[0]<limit){
+              rateChart.data.labels.shift(); rateChart.data.datasets[0].data.shift();
+            }
+            rateChart.update(); saveGraphData();
+          }
+        }).catch(function(e){console.log('data err',e);});
+      }
+
+      // Initialize after loading Chart.js and the date adapter
+      function start(){
+        initChart();
+        loadGraphData();
+        fetchHistoricalData();
+        fetchData();
+        setInterval(fetchData,30000);
+      }
+
+      // Lazy-load heavy libs, then start
+      Promise.resolve()
+        .then(function(){ return loadScript('https://cdn.jsdelivr.net/npm/chart.js'); })
+        .then(function(){ return loadScript('https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns'); })
+        .then(start)
+        .catch(function(e){ console.log('chart libs failed', e); });
+    })();
+    """
+    return Response(body=js, headers={'Content-Type':'application/javascript','Cache-Control':'max-age=604800'})
 
 def usr_switch_pressed(pin):
     """interrupt handler for the user switch"""
@@ -776,9 +728,10 @@ def check_leader_status():
     except OSError:
         return True
 
+
 ##################################################################    
 # these variables are used for communication between web server
-# and readout thread
+# and readout thread. GLOBALS
 shutdown_request = False
 restart_request = False
 muon_count = 0
@@ -791,6 +744,7 @@ is_leader = True
 avg_time = 0.
 rates = RingBuffer.RingBuffer(120,'f')
 start_time_sec = 0
+last_req_ms = 0
 ##################################################################
 
 ##################################################################
@@ -825,15 +779,39 @@ if not wlan.active():
 now = init_RTC()
 print(f"current time is {now}")
 init_sdcard()
+gc.collect() # early heap consolidation
 
+server_task = None  # global handle to the running server task
 
+async def server_monitor():
+    global server_task
+    while True:
+        try:
+            if server_task is not None and server_task.done():
+                exc = server_task.exception()
+                print("[monitor] server task ended", ("with exception:" if exc else "cleanly"), exc)
+                if exc:
+                    sys.print_exception(exc)   # <-- keep the traceback
 
+                # attempt a restart
+                server_task = asyncio.create_task(app.start_server(host='0.0.0.0', port=80, debug=False))
+                print("[monitor] server restarted")
+        except Exception as e:
+            print("[monitor] error:", e)
+        await asyncio.sleep(15) # check every 15 seconds
 
 
 async def main():
     global muon_count, iteration_count, rate, waited, switch_pressed, avg_time
     global rates, threshold, reset_threshold, is_leader, start_time_sec
-    server = asyncio.create_task(app.start_server(port=80, debug=True))
+    global server_task
+    server_task = asyncio.create_task(app.start_server(host='0.0.0.0', port=80, debug=False))
+    mon_task = asyncio.create_task(server_monitor())
+    try:
+        ip = wlan.ifconfig()[0]
+        print("[server] listening on http://%s:80" % ip)
+    except Exception as e:
+        print("[server] unable to get IP:", e)
     print("main() started")
     l1t = led1.toggle
     l2on = led2.on
@@ -855,7 +833,10 @@ async def main():
     # calibrate the threshold with HV on
     hv_power_enable = Pin(19, Pin.OUT)
     hv_power_enable.on()
-    baseline, rms = await calibrate_average_rms(500)
+
+    await asyncio.sleep_ms(0)
+    baseline, rms = calibrate_average_rms(500)
+    await asyncio.sleep_ms(0)
     # 100 counts correspond to roughly (100/(2^16))*3.3V = 0.005V. So 1000 counts
     # is 50 mV above threshold. the signal in Sally is about 0.5V.
     threshold = int(round(baseline + 1000.))
@@ -889,20 +870,28 @@ async def main():
 
     INNER_ITER_LIMIT = const(400_000)
     OUTER_ITER_LIMIT = const(20*INNER_ITER_LIMIT)
+    YIELD_PERIOD_MS = const(50)  # tune: 20–50 ms to taste
 
     dts = RingBuffer.RingBuffer(50)
     coincidence = 0
-    print("start of data taking loop")
+    print("[main]: start of data taking loop")
     loop_timer_time = tmeas()
+    last_yield = loop_timer_time
     while True:
         iteration_count += 1
         if iteration_count % INNER_ITER_LIMIT == 0:
             rate = 1000./dts.calculate_average()
             tdiff = time.ticks_diff(tmeas(), loop_timer_time)
             avg_time = tdiff/INNER_ITER_LIMIT
-            print(f"iter {iteration_count}, # {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free, avg time {avg_time:.3f} ms")
-            l1t()
             loop_timer_time = tmeas()
+            try:
+                delta_req = time.ticks_diff(loop_timer_time, last_req_ms)
+            except Exception:
+                delta_req = -1
+            print(f"iter {iteration_count}, # {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free, "
+                f"avg time {avg_time:.3f} ms, last_req_delta={delta_req} ms, "
+                f"last_yield_delta={time.ticks_diff(loop_timer_time, last_yield)} ms")
+            l1t()
             # update rates ring buffer every half minute. this time needs to be synched with the web server
             if time.ticks_diff(loop_timer_time, tlast) >= 30000:  # 30,000 ms = 30 seconds
                 rates.append(round(rate, 2))
@@ -949,13 +938,32 @@ async def main():
             l2off()
             if not is_leader:
                 coincidence_pin.value(0)
-        if iteration_count % 1_000 == 0:
-            await asyncio.sleep_ms(0) # this yields to the web server running in the other thread
+        if iteration_count % 3_000 == 0:
+            last_yield = tmeas()
+            await asyncio.sleep_ms(0) # yield to the web server running in the other thread
+            # now_ticks = tmeas()
+            # if time.ticks_diff(now_ticks, last_yield) >= YIELD_PERIOD_MS:
+            #     await asyncio.sleep_ms(0) # this yields to the web server running in the other thread
+            #     last_yield = now_ticks
+        # # Cooperative yield with a budget: only when idle and at most every YIELD_PERIOD_MS
+        # if adc_value <= threshold:
+        #     now_ticks = tmeas()
+        #     if time.ticks_diff(now_ticks, last_yield) >= YIELD_PERIOD_MS:
+        #         await asyncio.sleep_ms(0)
+        #         last_yield = now_ticks
         if shutdown_request or switch_pressed or restart_request:
             print("tight loop shutdown, waited is ", waited)
             break
+    try:
+        mon_task.cancel()
+    except Exception:
+        pass
+    # Microdot's shutdown() is synchronous; do not await it on MicroPython
+    app.shutdown()
     f.close()
-    await server
+    await server_task
+    # f.close()
+    # await server
 
 # start the web server and wait for exceptions to end it. 
 try: 
