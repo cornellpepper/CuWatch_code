@@ -17,11 +17,12 @@ FILES="styles.css \
 MAIN_FILE="asynchio4.py"
 
 mpremote mip install sdcard
+mpremote mip install ntptime
 mpremote fs cp $FILES :
 mpremote fs cp $MAIN_FILE :main.py
 
 # download the microdot library if it does not exist
-MICRODOT_VER=2.0.6
+MICRODOT_VER=2.3.3
 MICRODOT_TGZ="https://github.com/miguelgrinberg/microdot/archive/refs/tags/v"${MICRODOT_VER}".tar.gz"
 
 MICRODOT_FILES="microdot.py \
