@@ -10,7 +10,7 @@ import time
 import io
 import uos as os
 import gc
-import urequests
+#import urequests
 import ujson as json
 import ntptime
 
@@ -193,7 +193,7 @@ rates = RingBuffer.RingBuffer(120,'f')
 start_time_sec = 0
 ##################################################################
 # MQTT configuration
-MQTT_BROKER = getattr(my_secrets, 'MQTT_BROKER', '10.49.72.125')
+MQTT_BROKER = getattr(my_secrets, 'MQTT_BROKER', 'pepper.physics.cornell.edu')
 MQTT_PORT = getattr(my_secrets, 'MQTT_PORT', 1883)
 MQTT_CLIENT_ID = getattr(my_secrets, 'MQTT_CLIENT_ID', b"cuwatch_node")
 
@@ -232,16 +232,16 @@ init_sdcard()
 
 
 def get_device_id():
-    """Read the device ID from /sd/id.txt and return as int"""
+    """Read the device ID from id.txt and return as int"""
     try:
-        with open('/sd/id.txt', 'r') as f:
+        with open('id.txt', 'r') as f:
             return int(f.read().strip())
     except Exception as e:
         print("Error reading device ID:", e)
         return 0
 
 device_id = get_device_id()
-device_id = 3
+#device_id = 3
 print(f"Device ID: {device_id}")
 
 # Set MQTT topics after device_id is known
@@ -249,16 +249,51 @@ MQTT_TOPIC = f"telemetry/{device_id:03d}".encode()
 MQTT_STATUS_TOPIC = f"status/{device_id:03d}".encode()
 MQTT_CONTROL_TOPIC = f"control/{device_id:03d}/set".encode()
 
+mqtt_client = None  # global MQTT client instance
+
 def mqtt_connect():
-    client = MQTTClient(MQTT_CLIENT_ID, MQTT_BROKER, port=MQTT_PORT)
-    # Set callback for incoming messages
-    client.set_callback(mqtt_message_callback)
-    client.connect()
-    print("Connected to MQTT broker")
-    # Subscribe to control topic
-    client.subscribe(MQTT_CONTROL_TOPIC)
-    print(f"Subscribed to topic: {MQTT_CONTROL_TOPIC}")
-    return client
+    global mqtt_client
+    try:
+        # use a keepalive so broker can detect dead clients
+        client = MQTTClient(MQTT_CLIENT_ID, MQTT_BROKER, port=MQTT_PORT, keepalive=60)
+        client.set_callback(mqtt_message_callback)
+        client.connect()
+        client.subscribe(MQTT_CONTROL_TOPIC)
+        mqtt_client = client
+        print("Connected to MQTT broker")
+        return client
+    except Exception as e:
+        print("MQTT connect failed:", e)
+        mqtt_client = None
+        return None
+
+def ensure_mqtt_connected():
+    """Ensure mqtt_client is connected; attempt reconnect if not."""
+    global mqtt_client
+    if mqtt_client is not None:
+        return True
+    # try to connect
+    mqtt_connect()
+    return mqtt_client is not None
+
+def safe_publish(topic, msg):
+    """Publish with reconnect attempts; return True if published."""
+    global mqtt_client
+    if not ensure_mqtt_connected():
+        print("MQTT not connected, skipping publish")
+        return False
+    try:
+        mqtt_client.publish(topic, msg)
+        return True
+    except Exception as e:
+        print("Publish failed, will reconnect:", e)
+        try:
+            # drop old client and try reconnect
+            mqtt_client = None
+        except:
+            pass
+        ensure_mqtt_connected()
+        return False
 
 def mqtt_message_callback(topic, msg):
     global threshold
@@ -279,32 +314,41 @@ def mqtt_message_callback(topic, msg):
         finally:
             gc.collect()
 
-async def mqtt_check_loop(mqtt_client):
+async def mqtt_check_loop():
+    """Periodically call check_msg and attempt reconnect on errors."""
+    global mqtt_client
     while True:
+        if not ensure_mqtt_connected():
+            # wait and retry connect
+            await asyncio.sleep(5)
+            continue
         try:
             mqtt_client.check_msg()
         except OSError as e:
             print("MQTT check_msg error:", e)
-            # Attempt to reconnect on connection reset
+            # force reconnection on socket errors
             try:
-                mqtt_client.connect(False)
-                mqtt_client.subscribe(MQTT_CONTROL_TOPIC)
-                print("Reconnected and re-subscribed to MQTT broker.")
-            except Exception as e2:
-                print("MQTT reconnect failed:", e2)
+                mqtt_client = None
+            except:
+                pass
+            ensure_mqtt_connected()
         except Exception as e:
             print("MQTT check_msg generic error:", e)
-        await asyncio.sleep(5)  # check every 5 seconds
+        await asyncio.sleep(5)
 
-async def status_publish_loop(mqtt_client, get_status_msg):
+async def status_publish_loop(get_status_msg):
+    """Publish status every 30s using safe_publish()."""
     while True:
         try:
-            status_msg = get_status_msg()
-            mqtt_client.publish(MQTT_STATUS_TOPIC, status_msg)
-            print("sent status message")
+            if ensure_mqtt_connected():
+                status_msg = get_status_msg()
+                if not safe_publish(MQTT_STATUS_TOPIC, status_msg):
+                    print("Status publish failed; will retry next loop")
+            else:
+                print("Status publish skipped: MQTT not connected")
         except Exception as e:
             print("MQTT publish error (status):", e)
-        await asyncio.sleep(30) # send every 30 seconds
+        await asyncio.sleep(30)
 
 async def main():
     global muon_count, iteration_count, rate, waited, switch_pressed, avg_time
@@ -373,8 +417,8 @@ async def main():
 
     # MQTT setup
     mqtt_client = mqtt_connect()
-    # Start MQTT check loop
-    asyncio.create_task(mqtt_check_loop(mqtt_client))
+    # Start MQTT check loop (uses global mqtt_client)
+    asyncio.create_task(mqtt_check_loop())
 
     def get_status_msg():
         return json.dumps({
@@ -386,7 +430,6 @@ async def main():
         })
 
     status_task_started = False
-
     first_event = True  # Track if this is the first event
 
     while True:
@@ -409,7 +452,7 @@ async def main():
                 gc.collect()
             # Start status publish loop after first INNER_ITER_LIMIT
             if not status_task_started:
-                asyncio.create_task(status_publish_loop(mqtt_client, get_status_msg))
+                asyncio.create_task(status_publish_loop(get_status_msg))
                 status_task_started = True
         adc_value = readout()  # Read the ADC value (0 - 65535)
         if adc_value > threshold:
@@ -466,7 +509,7 @@ async def main():
                 first_event = False
             try:
                 event_msg = json.dumps(event_data)
-                mqtt_client.publish(MQTT_TOPIC, event_msg)
+                safe_publish(MQTT_TOPIC, event_msg)
                 gc.collect()  # Collect after event processing
             except Exception as e:
                 print("MQTT publish error (event):", e)
