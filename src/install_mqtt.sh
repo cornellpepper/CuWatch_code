@@ -17,6 +17,7 @@ MAIN_FILE="asynchio5.py"
 
 mpremote mip install sdcard
 mpremote mip install umqtt.simple
+mpremote mip install ntptime
 
 mpremote fs cp $FILES :
 mpremote fs cp $MAIN_FILE :main.py
