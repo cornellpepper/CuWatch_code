@@ -37,7 +37,11 @@ def generate_dummy_data():
     adc_value = random.randint(0, 4095)
     temperature_adc_value = random.randint(0, 4095)
     dt = random.randint(0, 10)
-    end_time = int(time.time())
+    current_time = time.time()
+    if not hasattr(generate_dummy_data, "last_event_time"):
+        generate_dummy_data.last_event_time = current_time
+    end_time = int((current_time - generate_dummy_data.last_event_time) * 1000)
+    generate_dummy_data.last_event_time = current_time
     wait_counts = random.randint(0, 1000)
     coincidence = random.choice([0, 1])
     # Create a dictionary to hold the data.
@@ -82,7 +86,8 @@ client.on_message = on_message
 
 # Set keepalive to detect disconnections faster
 #client.connect("localhost", 1883, 10)  # 10 second keepalive
-client.connect("10.49.72.125", 1883, 10)  # 10 second keepalive
+#client.connect("10.49.72.125", 1883, 10)  # 10 second keepalive
+client.connect("192.168.4.62", 1883, 10)  # 10 second keepalive
 client.loop_start()
 
 try:
