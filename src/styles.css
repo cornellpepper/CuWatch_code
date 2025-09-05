@@ -22,6 +22,7 @@ body {
     margin-left: 250px; /* Make space for the sidebar */
     padding: 20px;
     width: calc(100% - 250px);
+    padding-bottom: 60px; /* Make space for the footer */
 }
 
 /* Header styling */
@@ -73,10 +74,8 @@ input.form-control {
     margin-bottom: 10px;
 }
 
-footer {
-    position: fixed;
-    bottom: 0;
-    width: 100%;
-    background-color: #f8f9fa;
-    padding: 10px 0;
+footer { 
+    width: 100%; 
+    background-color: #f8f9fa; 
+    padding: 10px 0; 
 }
