@@ -55,7 +55,7 @@ def main():
     led1 = Pin('LED', Pin.OUT)
     led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
 
-    print("wifi init....")
+    print(f"wifi init...., ssid {my_secrets.SSID}")
     if not init_wifi(my_secrets.SSID, my_secrets.PASS):
         print("Couldn't initialize wifi")
         start_time = time.time()
