@@ -39,16 +39,17 @@ def generate_dummy_data(device_number):
     muon_count = muon_count + 1
     adc_value = random.randint(0, 4095)
     temperature_adc_value = random.randint(0, 4095)
-    dt = random.randint(0, 10)
     current_time = time.time()
     if not hasattr(generate_dummy_data, "last_event_time"):
         generate_dummy_data.last_event_time = current_time
+    # dt: time since previous event in milliseconds
+    dt = int((current_time - generate_dummy_data.last_event_time) * 1000)
     end_time = int((current_time - generate_dummy_data.last_event_time) * 1000)
     generate_dummy_data.last_event_time = current_time
     wait_counts = random.randint(0, 1000)
     coincidence = random.choice([0, 1])
-    # Create a dictionary to hold the data.
-    return {
+    # Add run_time on first event
+    data = {
         "device_number": device_number,
         "muon_count": muon_count,
         "adc_v": adc_value,
@@ -58,6 +59,10 @@ def generate_dummy_data(device_number):
         "wait_cnt": wait_counts,
         "coincidence": coincidence
     }
+    if not hasattr(generate_dummy_data, "run_time_set"):
+        data["run_start"] = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(current_time))
+        generate_dummy_data.run_time_set = True
+    return data
 
 # publish dummy data to a topic as JSON
 def publish_data(client, topic, device_number):
@@ -99,8 +104,8 @@ client.on_message = on_message
 
 # Set keepalive to detect disconnections faster
 #client.connect("localhost", 1883, 10)  # 10 second keepalive
-client.connect("10.49.72.125", 1883, 10)  # 10 second keepalive
-#client.connect("192.168.4.62", 1883, 10)  # 10 second keepalive
+#client.connect("10.49.72.125", 1883, 10)  # 10 second keepalive
+client.connect("192.168.4.62", 1883, 10)  # 10 second keepalive
 client.loop_start()
 
 try:
