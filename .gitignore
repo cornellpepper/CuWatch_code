@@ -172,3 +172,4 @@ src/microdot-*/**
 src/v*.tar.gz
 src/mqtt_data.db
 src/id.txt
+/typings

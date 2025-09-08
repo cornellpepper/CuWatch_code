@@ -30,8 +30,9 @@ shutdown_request = False
 
 @micropython.native
 async def calibrate_average_rms(n: int) -> tuple:
-    """calibrate the threshold value by taking the average of n samples. Assumes no muons are present"""
-    led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
+    """calibrate the threshold value by taking the average of n samples. Assumes no 
+       muons are present"""
+    local_led2 = Pin(15, Pin.OUT) # local LED on pepper carrier board
     adc = ADC(0)  # Pin 26 is GP26, which is ADC0
     sumval = 0
     sum_squared = 0
@@ -39,12 +40,12 @@ async def calibrate_average_rms(n: int) -> tuple:
         value = adc.read_u16()
         sumval += value
         sum_squared += value ** 2
-        led2.toggle()
+        local_led2.toggle()
         await asyncio.sleep_ms(10) # wait 
     mean = sumval / n
     variance = (sum_squared / n) - (mean ** 2)
     standard_deviation = variance ** 0.5
-    led2.value(0)
+    local_led2.value(0)
     return mean, standard_deviation
 
 
@@ -113,25 +114,21 @@ def init_RTC():
         print("Failed to set RTC time")
         random_hour = urandom.getrandbits(5) % 24  # Generate a random hour (0-23)
         random_minute = urandom.getrandbits(6) % 60  # Generate a random minute (0-59)
-        # Set RTC to a random time on 1/1/2020
-        rtc.datetime((2020, 1, 1, 0, random_hour, random_minute, 0, 0))
+        # Set RTC to a random time on 1/1/2024
+        rtc.datetime((2024, 1, 1, 0, random_hour, random_minute, 0, 0))
     return get_iso8601_timestamp()
 
 
-def get_iso8601_timestamp(timezone_offset="+00:00"):
-    """return RTC time as an ISO8601 string, default to UTC TZ"""
+def get_iso8601_timestamp():
+    """Return RTC time as an ISO8601 string in UTC with trailing 'Z'."""
     rtc = RTC()
-    dt = rtc.datetime()
-
-    # NOTE: no microsecond support in RTC, so we use 000000
-    timestamp = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}.{:06d}{}".format(
-        dt[0], dt[1], dt[2], dt[4], dt[5], dt[6], 0, timezone_offset
-    )
-
-    return timestamp
+    y, m, d, _, hh, mm, ss, _ = rtc.datetime()
+    # No microsecond support in RTC; emit 000000 and mark as Z (UTC)
+    return f"{y:04d}-{m:02d}-{d:02d}T{hh:02d}:{mm:02d}:{ss:02d}.000000Z"
 
 def init_file(baseline, rms, threshold, reset_threshold, now, is_leader) -> io.TextIOWrapper:
-    """ open file for writing, with date and time in the filename. write metadata. return filehandle """
+    """ open file for writing, with date and time in the filename. write metadata. 
+        return filehandle """
     now2 = time.localtime()
     year = now2[0]
     month = now2[1]
@@ -191,11 +188,12 @@ is_leader = True
 avg_time = 0.
 rates = RingBuffer.RingBuffer(120,'f')
 start_time_sec = 0
+# Track last control message (raw bytes) to avoid re-processing retained/duplicate commands
+last_control_msg = None
 ##################################################################
 # MQTT configuration
 MQTT_BROKER = getattr(my_secrets, 'MQTT_BROKER', 'pepper.physics.cornell.edu')
 MQTT_PORT = getattr(my_secrets, 'MQTT_PORT', 1883)
-MQTT_CLIENT_ID = getattr(my_secrets, 'MQTT_CLIENT_ID', b"cuwatch_node")
 
 ##################################################################
 
@@ -243,6 +241,7 @@ def get_device_id():
 device_id = get_device_id()
 #device_id = 3
 print(f"Device ID: {device_id}")
+MQTT_CLIENT_ID = f"cuwatch_{device_id:03d}".encode()
 
 # Set MQTT topics after device_id is known
 MQTT_TOPIC = f"telemetry/{device_id:03d}".encode()
@@ -297,15 +296,70 @@ def safe_publish(topic, msg):
 
 def mqtt_message_callback(topic, msg):
     global threshold
+    global last_control_msg
+    # Drop duplicate control payloads (e.g., retained messages on reconnect)
+    try:
+        if last_control_msg is not None and msg == last_control_msg:
+            print("Duplicate control message ignored")
+            return
+    except Exception:
+        pass
+    # remember this payload
+    last_control_msg = msg
+
+    def make_leader():
+        global is_leader
+        secondary_marker = "is_secondary"
+        if secondary_marker in os.listdir(''):
+            os.remove(secondary_marker)
+            print(f"Removed {secondary_marker}")
+        else:
+            print(f"{secondary_marker} does not exist")
+
+        is_leader = True
+    def make_follower():
+        global is_leader
+        secondary_marker = "is_secondary"
+        if secondary_marker in os.listdir(''):
+            print(f"{secondary_marker} already exists")
+        else:
+            with open(secondary_marker, "w") as f:
+                f.write("This node is a follower")
+            print(f"Created {secondary_marker}")
+        is_leader = False
+
     print("Received MQTT message on topic:", topic)
     print("Expected control topic:", MQTT_CONTROL_TOPIC)
     if topic == MQTT_CONTROL_TOPIC:
         try:
             # Decode bytes to string before loading JSON
             data = json.loads(msg.decode())
+            print("Control message data:", data)
             if "threshold" in data:
                 threshold = int(data["threshold"])
                 print(f"Threshold updated via MQTT: {threshold}")
+            # Accept either {"new_run": true}, {"shutdown": true} or legacy string payloads
+#            if (isinstance(data, dict) and data.get("new_run")) or (isinstance(data, str) and data == "new_run"):
+#                print("Received new_run command via MQTT")
+#                global restart_request
+#                restart_request = True
+#                print("Restart request recv (MQTT)")
+            if (isinstance(data, dict) and data.get("shutdown")) or (isinstance(data, str) and data == "shutdown"):
+                print("Received shutdown command via MQTT")
+                global shutdown_request
+                shutdown_request = True
+                print("Shutdown request recv (MQTT)")
+            if "make_leader" in data:
+                flag = bool(data["make_leader"])  # avoid shadowing function name
+                global is_leader
+                if flag:
+                    print("Switching to leader mode via MQTT")
+                    is_leader = True
+                    make_leader()
+                else:
+                    print("Switching to secondary mode via MQTT")
+                    is_leader = False
+                    make_follower()
         except MemoryError:
             print("MemoryError in MQTT callback, running gc.collect()")
             gc.collect()
@@ -494,8 +548,9 @@ async def main():
                 'muon_count': muon_count,
                 'adc_v': adc_value,
                 'temp_adc_v': temperature_adc_value,
-                'dt': dt,
-                'ts': end_time,
+                #'dt': dt,                 # milliseconds between this and previous hit
+                'ts': get_iso8601_timestamp(),  # ISO-8601 UTC wall-clock time (Z)
+                't_ms': end_time,         # monotonic ticks_ms for debugging
                 'wait_cnt': wait_counts,
                 'coincidence': coincidence
             }

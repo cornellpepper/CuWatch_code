@@ -936,7 +936,7 @@ async def main():
                     if coincidence_pin.value() == 1:
                         coincidence = 1
                 if wait_counts == 0:
-                    waited += 1 
+                    waited += 1
                     #logger.warning(f"waited too long, adc value {readout()}")
                     break
             # Calculate elapsed time in milliseconds
