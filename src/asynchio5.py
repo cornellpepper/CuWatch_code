@@ -339,11 +339,11 @@ def mqtt_message_callback(topic, msg):
                 threshold = int(data["threshold"])
                 print(f"Threshold updated via MQTT: {threshold}")
             # Accept either {"new_run": true}, {"shutdown": true} or legacy string payloads
-#            if (isinstance(data, dict) and data.get("new_run")) or (isinstance(data, str) and data == "new_run"):
-#                print("Received new_run command via MQTT")
-#                global restart_request
-#                restart_request = True
-#                print("Restart request recv (MQTT)")
+            if (isinstance(data, dict) and data.get("new_run")) or (isinstance(data, str) and data == "new_run"):
+                print("Received new_run command via MQTT")
+                global restart_request
+                restart_request = True
+                print("Restart request recv (MQTT)")
             if (isinstance(data, dict) and data.get("shutdown")) or (isinstance(data, str) and data == "shutdown"):
                 print("Received shutdown command via MQTT")
                 global shutdown_request
@@ -463,11 +463,13 @@ async def main():
 
     INNER_ITER_LIMIT = const(400_000)
     OUTER_ITER_LIMIT = const(20*INNER_ITER_LIMIT)
+    YIELD_PERIOD_MS = const(25)  # tune: 20–50 ms works well
 
     dts = RingBuffer.RingBuffer(50)
     coincidence = 0
     print("start of data taking loop")
     loop_timer_time = tmeas()
+    last_yield = loop_timer_time
 
     # MQTT setup
     mqtt_client = mqtt_connect()
@@ -486,6 +488,7 @@ async def main():
     status_task_started = False
     first_event = True  # Track if this is the first event
 
+    # DAQ main loop
     while True:
         iteration_count += 1
         if iteration_count % INNER_ITER_LIMIT == 0:
@@ -509,7 +512,7 @@ async def main():
                 asyncio.create_task(status_publish_loop(get_status_msg))
                 status_task_started = True
         adc_value = readout()  # Read the ADC value (0 - 65535)
-        if adc_value > threshold:
+        if adc_value > threshold: # we have a signal
             l2on()
             # Get the current time in milliseconds again
             end_time = tmeas()
@@ -530,7 +533,7 @@ async def main():
                     if coincidence_pin.value() == 1:
                         coincidence = 1
                 if wait_counts == 0:
-                    waited += 1 
+                    waited += 1
                     break
             # Calculate elapsed time in milliseconds
             dt = time.ticks_diff(end_time,start_time)
@@ -568,6 +571,12 @@ async def main():
                 gc.collect()  # Collect after event processing
             except Exception as e:
                 print("MQTT publish error (event):", e)
+        # Cooperative yield with a budget: only when idle and at most every YIELD_PERIOD_MS
+        if adc_value <= threshold:
+            now_ticks = tmeas()
+            if time.ticks_diff(now_ticks, last_yield) >= YIELD_PERIOD_MS:
+                await asyncio.sleep_ms(0)
+                last_yield = now_ticks
         if iteration_count % 1_000 == 0:
             await asyncio.sleep_ms(0)
             gc.collect()  # Collect periodically
