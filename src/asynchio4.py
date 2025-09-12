@@ -265,7 +265,7 @@ def index(request):
 @app.before_request
 def _log_request(request):
     try:
-        print("REQ", request.method, request.path)
+        #print("REQ", request.method, request.path)
         global last_req_ms
         last_req_ms = time.ticks_ms()
     except Exception:
