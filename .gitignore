@@ -170,3 +170,5 @@ src/*.mpy
 
 src/microdot-*/**
 src/v*.tar.gz
+/typings
+src/id.txt
