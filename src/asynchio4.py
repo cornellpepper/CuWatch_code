@@ -1,3 +1,6 @@
+# pylint: disable=missing-function-docstring,missing-class-docstring,missing-module-docstring
+# pylint: disable=too-many-locals,too-many-statements,too-many-arguments, invalid-name, global-statement
+# pylint: disable=consider-using-f-string, line-too-long, unused-argument
 from machine import ADC, Pin, RTC
 import asyncio
 import machine
@@ -897,7 +900,11 @@ async def main():
     while True:
         iteration_count += 1
         if iteration_count % INNER_ITER_LIMIT == 0:
-            rate = 1000./dts.calculate_average()
+            avg_dt = dts.calculate_average()
+            if avg_dt == 0.:
+                rate = 0.
+            else:
+                rate = 1000./avg_dt
             tdiff = time.ticks_diff(tmeas(), loop_timer_time)
             avg_time = tdiff/INNER_ITER_LIMIT
             print(f"iter {iteration_count}, # {muon_count}, {rate:.1f} Hz, {gc.mem_free()} free, avg time {avg_time:.3f} ms")
