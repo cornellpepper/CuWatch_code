@@ -192,7 +192,7 @@ SD_DIRECTORY = '/sd'
 
 
 # Streamed HTML generator for the home page (keeps memory usage low)
-def _index_stream(myrate, muon_count, threshold, reset_threshold, runtime):
+def _index_stream(myrate, muon_count, baseline, threshold, reset_threshold, runtime):
     yield """
     <!doctype html>
     <html>
@@ -233,6 +233,9 @@ def _index_stream(myrate, muon_count, threshold, reset_threshold, runtime):
                 <tr><td>Muon Count</td><td id="muon_count">"""
     yield str(muon_count)
     yield """</td></tr>
+                <tr><td>Baseline (ADC counts)</td><td id="baseline">"""
+    yield str(baseline)
+    yield """</td></tr>
                 <tr><td>Threshold (ADC counts)</td><td id="threshold">"""
     yield str(threshold)
     yield """</td></tr>
@@ -262,7 +265,7 @@ def index(request):
     if myrate is None:
         myrate = 0.
     runtime = time.time() - start_time_sec
-    return Response(body=_index_stream(myrate, muon_count, threshold, reset_threshold, runtime),
+    return Response(body=_index_stream(myrate, muon_count, baseline, threshold, reset_threshold, runtime),
                     headers={'Content-Type': 'text/html', 'Cache-Control': 'no-cache'})
 
 @app.before_request
@@ -305,6 +308,9 @@ def submit(request):
             new_value = 0
         elif new_value > 65535:
             new_value = 65535
+        # make sure this is not below the reset threshold
+        if new_value < reset_threshold:
+            return 'New threshold cannot be below reset threshold.', 400
         threshold = new_value
         
         # Redirect to the main page to avoid form resubmission prompt
@@ -585,7 +591,8 @@ def boot_js(request):
       function populateOnce(){
         fetch('/data').then(r=>r.json()).then(function(d){
           var set=function(id,v){var e=document.getElementById(id); if(e){ e.textContent=v; }};
-          set('rate', d.rate); set('muon_count', d.muon_count); set('threshold', d.threshold);
+          set('rate', d.rate); set('muon_count', d.muon_count); set('baseline', d.baseline);
+          set('threshold', d.threshold);
           set('reset_threshold', d.reset_threshold); set('runtime', d.runtime);
           var lu=document.getElementById('last_updated');
           if(lu){ lu.textContent='Last updated: '+(new Date()).toLocaleTimeString(); }
