@@ -217,6 +217,11 @@ def _index_stream(myrate, muon_count, baseline, threshold, reset_threshold, runt
                 <input type="number" id="thresholdInput" class="form-control" placeholder="Enter new threshold">
                 <button class="btn btn-primary mt-2" onclick="updateThreshold()">Update Threshold</button>
               </li>
+            <li class="nav-item">
+                <small class="form-text text-muted mt-1">
+                    Threshold should be an integer greater than the reset threshold.
+                </small>
+            </li>
             </ul>
             <p id="time" class="text-center mt-4"></p>
           </div>
@@ -289,7 +294,8 @@ def data(request):
         'muon_count': muon_count,
         'threshold': threshold,
         'reset_threshold': reset_threshold,
-        'runtime': runtime
+        'runtime': runtime,
+        'baseline': baseline
     }), headers={'Content-Type': 'application/json'})
 
 # Lightweight health endpoint: if this responds, the server is active
@@ -610,7 +616,18 @@ def boot_js(request):
         var v=document.getElementById('thresholdInput'); if(!v||!v.value){alert('Enter threshold'); return;}
         var xhr=new XMLHttpRequest(); xhr.open('POST','/submit',true);
         xhr.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
-        xhr.onreadystatechange=function(){ if(xhr.readyState===4 && xhr.status!==200){ alert('Failed to update threshold'); } };
+        xhr.onreadystatechange=function(){
+          if(xhr.readyState===4){
+            if(xhr.status===200){
+              // Success, reload page
+              window.location.reload();
+            }else{
+              // Show actual error message from server
+              var msg = xhr.responseText || 'Failed to update threshold';
+              alert(msg);
+            }
+          }
+        };
         xhr.send('threshold='+encodeURIComponent(v.value));
       };
 
@@ -755,6 +772,7 @@ avg_time = 0.
 rates = RingBuffer.RingBuffer(120,'f')
 start_time_sec = 0
 last_req_ms = 0
+baseline = 0
 ##################################################################
 
 ##################################################################
@@ -813,7 +831,7 @@ async def server_monitor():
 
 async def main():
     global muon_count, iteration_count, rate, waited, switch_pressed, avg_time
-    global rates, threshold, reset_threshold, is_leader, start_time_sec
+    global rates, threshold, reset_threshold, is_leader, start_time_sec, baseline
     global server_task
     server_task = asyncio.create_task(app.start_server(host='0.0.0.0', port=80, debug=False))
     mon_task = asyncio.create_task(server_monitor())
