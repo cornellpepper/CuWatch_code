@@ -4,6 +4,19 @@ set -e
 
 trap 'echo "Error occurred at line $LINENO: $BASH_COMMAND"; exit 1' ERR
 
+if [ "$#" -ne 1 ]; then
+  echo "Need 1 argument: board number"
+  exit 1
+fi
+if [ "$1" -ne "$1" ]; then
+  echo "$1 is not a number"
+  exit 2
+fi
+BOARD_ID=$1
+[ -f id.txt ] && rm id.txt
+echo $BOARD_ID > id.txt
+
+
 source $(conda info --base)/etc/profile.d/conda.sh
 conda activate rpico
 
