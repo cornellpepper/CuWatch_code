@@ -21,4 +21,11 @@ sh ./install.sh
 ```
 
 ### if you are using Windows
-there is a largely untested all-python version on the install script called `install.py`. There is also a powershell script that is totall untested (and written by ChatGPT).
+there is a largely untested all-python version on the install script called `install.py`. Run it as follows:
+
+```
+python install.py --port COM3
+```
+Replace COM3 with the actual port. The port argument is required.
+
+There is also a powershell script that is totall untested (and written by ChatGPT).
