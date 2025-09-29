@@ -4,8 +4,8 @@ set -e
 
 trap 'echo "Error occurred at line $LINENO: $BASH_COMMAND"; exit 1' ERR
 
-source $(conda info --base)/etc/profile.d/conda.sh
-conda activate rpico
+# source $(conda info --base)/etc/profile.d/conda.sh
+# conda activate rpico
 
 
 # list of files to install
