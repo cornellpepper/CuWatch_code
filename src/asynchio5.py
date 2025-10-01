@@ -482,6 +482,7 @@ async def main():
             'muon_count': muon_count,
             'threshold': threshold,
             'reset_threshold': reset_threshold,
+            'baseline': baseline,
             'runtime': time.time() - start_time_sec
         })
 
