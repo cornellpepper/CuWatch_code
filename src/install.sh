@@ -16,6 +16,9 @@ FILES="styles.css \
 
 MAIN_FILE="asynchio4.py"
 
+# compile the RingBuffer module - creates mpy file
+mpy-cross RingBuffer.py
+
 mpremote fs rm -r :.
 mpremote mip install sdcard
 mpremote mip install ntptime
@@ -44,6 +47,7 @@ fi
 
 cd $MICRODOT_DIR/src/microdot
 
+# compile and copy the microdot files
 for f in $MICRODOT_FILES; do
     mpy-cross $f
     ff=$(basename $f .py).mpy 
