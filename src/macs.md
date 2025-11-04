@@ -31,4 +31,8 @@ This table is the guide for associating MAC address with names for the CuPeppper
 |2c:cf:67:9b:76:46 | unassigned | |
 |2c:cf:67:9b:74:84| unassigned | |
 |2c:cf:67:d9:9c:69| 25 | |
-
+|2c:cf:67:d9:9c:8f| 26 | |
+|2c:cf:67:d9:9c:6b| 27 | |
+|2c:cf:67:d9:9c:33| 28 | |
+|2c:cf:67:d9:9c:c1| 29 | |
+|2c:cf:67:d9:9c:91| 30 | |
