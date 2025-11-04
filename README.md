@@ -28,6 +28,16 @@ PhysIT will assign an IP address of the form v2cupepperXX.physics to the Pico-W,
 
 ### Load the latest firmware onto the board. 
 
+#### Make sure you have a file called `my_secrets.py` locally
+
+for Physics 1110, this works. If you had a wifi password, you'd need a password for the wifi network too.
+
+```text
+PASS=None
+SSID="RedRover"
+MQTT_SERVER="pepper.physics.cornell.edu"
+```
+
 #### If you are using a MacOS or Linux
 
 There is a shell script that should do what you want. See [the script here](https://github.com/cornellpepper/CuWatch_code/blob/main/src/install.sh).
