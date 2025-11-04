@@ -28,11 +28,11 @@ This table is the guide for associating MAC address with names for the CuPeppper
 | 2c:cf:67:9b:75:5a | 22 | |
 | 2c:cf:67:9b:74:39 | 23 | |
 | 2c:cf:67:9b:75:13 | 24 | no output on repl |
-|2c:cf:67:9b:76:46 | unassigned | |
-|2c:cf:67:9b:74:84| unassigned | |
-|2c:cf:67:d9:9c:69| 25 | |
-|2c:cf:67:d9:9c:8f| 26 | |
-|2c:cf:67:d9:9c:6b| 27 | |
-|2c:cf:67:d9:9c:33| 28 | |
-|2c:cf:67:d9:9c:c1| 29 | |
-|2c:cf:67:d9:9c:91| 30 | |
+|2c:cf:67:9b:76:46 | unassigned | not yet registered|
+|2c:cf:67:9b:74:84| unassigned |not yet registered |
+|2c:cf:67:d9:9c:69| 25 |not yet registered |
+|2c:cf:67:d9:9c:8f| 26 |not yet registered |
+|2c:cf:67:d9:9c:6b| 27 |not yet registered |
+|2c:cf:67:d9:9c:33| 28 |not yet registered |
+|2c:cf:67:d9:9c:c1| 29 |not yet registered |
+|2c:cf:67:d9:9c:91| 30 |not yet registered |
