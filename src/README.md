@@ -1,22 +1,6 @@
 # Instructions
 
-All code assumes you have the micropython repl installed. Instructions for doing so [can be found here](https://www.raspberrypi.com/documentation/microcontrollers/micropython.html).
-
-To get mpremote, suggest you follow the instructions here and install via pip the following two packages:
-
-```shell
-pip install --user mpremote
-pip install --user mpy-cross
-```
-
-The former is a command-line tool for connecting to the micropython repl; the second is a way to cross-compile the microdot web server, which is needed because the compilation step can't be done on the pico itself.
-
-Then install the packages required. A handy script is in the repo.
-
-```shell
-./install.sh
-```
-This script will, using `mpremote`, wipe the internal flash file system, install the necessary packages from micropython and the local repository and download the appropriate version of the web server [[microdot](https://microdot.readthedocs.io/en/latest/index.html)] and install the required files from it.
+See the instructions in the top-level readme.
 
 ## Program flow as of 11/5/2024
 
@@ -53,11 +37,11 @@ Add a password for other networks.
 
 To have the web page and readout run by default, the python file needs to be copied to the pico as `main.py`:
 
-```shell
+```sh
 mpremote fs cp asynchio4.py :main.py
 ```
 
-Micropython automatically runs the file called `main.py` when it starts.
+The install scripts do this for the above repos. Micropython automatically runs the file called `main.py` when it starts.
 
 ## Other files as of 2025-9-23
 
