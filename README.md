@@ -26,9 +26,9 @@ mpremote findmac.py
 
 PhysIT will assign an IP address of the form v2cupepperXX.physics to the Pico-W, where XX identifies the particular Pico-W in question. Add the MAC address and corresponding number [to the table here](https://github.com/cornellpepper/CuWatch_code/blob/main/src/macs.md).
 
-## Load the latest firmware onto the board. 
+### Load the latest firmware onto the board. 
 
-### If you are using a MacOS or Linux
+#### If you are using a MacOS or Linux
 
 There is a shell script that should do what you want. See [the script here](https://github.com/cornellpepper/CuWatch_code/blob/main/src/install.sh).
 
@@ -38,7 +38,7 @@ Run as follows
 sh ./install.sh
 ```
 
-### If you are using Windows
+#### If you are using Windows
 
 There is a largely untested all-python version on the install script called `install.py`. Run it as follows:
 
