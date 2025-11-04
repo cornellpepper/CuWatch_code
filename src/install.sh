@@ -22,7 +22,7 @@ mpy-cross RingBuffer.py
 # create my_secrets.py if it does not exist
 if [ ! -f my_secrets.py ]; then
     echo "Creating my_secrets.py file. Please edit it with your WiFi credentials."
-    cat my_secrets.py <<EOL
+    cat > my_secrets.py <<EOL
 # my_secrets.py for RedRover
 PASS=None
 SSID="RedRover"
