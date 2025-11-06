@@ -19,7 +19,8 @@ MAIN_FILE="asynchio4.py"
 # compile the RingBuffer module - creates mpy file
 mpy-cross RingBuffer.py
 
-# create my_secrets.py if it does not exist
+# create my_secrets.py if it does not exist. Since RedRover does not 
+# require WiFi credentials, we can provide default values.
 if [ ! -f my_secrets.py ]; then
     echo "Creating my_secrets.py file. Please edit it with your WiFi credentials."
     cat > my_secrets.py <<EOL
