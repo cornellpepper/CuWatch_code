@@ -14,9 +14,13 @@ Install `mpremote` and `mpy-cross` in your favorite local python enviromnent usi
 pip install mpremote mpy-cross
 ```
 
-## How to prep a board for use in Physics 2010.
+## How to prep a board for use in Physics 1110 at Cornell
 
-### Register the Pico-W with PhysIT.
+### Clone or copy this repo to your local machine
+
+Either download the zip file or use git to clone the local repo to your machine.
+
+### Register the Pico-W with PhysIT
 
 To be able to log onto the Pico-W web server, its MAC address must be registered with PhysIT. To get the mac address, plug the board into your computer and run the `findmac.py` script.
 
@@ -26,11 +30,12 @@ mpremote findmac.py
 
 PhysIT will assign an IP address of the form v2cupepperXX.physics to the Pico-W, where XX identifies the particular Pico-W in question. Add the MAC address and corresponding number [to the table here](https://github.com/cornellpepper/CuWatch_code/blob/main/src/macs.md).
 
-### Load the latest firmware onto the board. 
+### Load the latest firmware onto the board
 
-#### Make sure you have a file called `my_secrets.py` locally
+#### See if you need a non-standard `my_secrets.py` file
 
-for Physics 1110, this works. If you had a wifi password, you'd need a password for the wifi network too.
+This file has the SSID and wifi password in it. The install scripts create one if none exists.
+For Physics 1110, this works, since RedRover does not require a password. If you had a wifi password, you'd need a password for the wifi network too.
 
 ```text
 PASS=None
@@ -50,13 +55,5 @@ sh ./install.sh
 
 #### If you are using Windows
 
-There is a largely untested all-python version on the install script called `install.py`. Run it as follows:
-
-```sh
-python install.py --port COM3
-```
-
-Replace COM3 with the actual port. The port argument is required.
-
-There is also a powershell script that is totall untested (and written by ChatGPT).
+There is a powershell script that is the equivalent. Needs testing.
 Question: does the shell script work with WSL in Windows?
