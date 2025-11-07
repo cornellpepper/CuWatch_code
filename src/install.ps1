@@ -1,5 +1,8 @@
 #!/usr/bin/env pwsh
 # install.ps1 - PowerShell version of install.sh
+# suggest running this via something like
+# powershell.exe -ExecutionPolicy Bypass -File "C:\Path\To\YourScript.ps1"
+# Assumes mpremote and mpy-cross are in your PATH or whatever the equivalent is for PowerShell
 
 $ErrorActionPreference = "Stop"
 
