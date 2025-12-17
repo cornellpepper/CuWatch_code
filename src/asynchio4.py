@@ -957,10 +957,11 @@ async def main():
                     if coincidence_pin.value() == 1:
                         coincidence = 1
                 if wait_counts == 0:
-                    waited += 1
+                    waited += 1 
                     # we yield here to let the web server run. Most of the time if we get here something
                     # has gone wrong.
                     await asyncio.sleep_ms(5) # yield to the web server running in the other thread
+                    break
             # Calculate elapsed time in milliseconds
             dt = time.ticks_diff(end_time,start_time) # what about wraparound
             dts.append(dt)
