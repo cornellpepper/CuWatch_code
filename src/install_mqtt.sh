@@ -8,7 +8,7 @@ if [ "$#" -ne 1 ]; then
   echo "Need 1 argument: board number"
   exit 1
 fi
-if [ "$1" -ne "$1" ]; then
+if ! [ "$1" -eq "$1" ] 2>/dev/null; then
   echo "$1 is not a number"
   exit 2
 fi
