@@ -1,2 +1,0 @@
-export PICO_SDK_PATH=/Users/wittich/src/pico-sdk-2.1.1
-conda activate rpico
