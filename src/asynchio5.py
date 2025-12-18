@@ -10,22 +10,19 @@ import time
 import io
 import uos as os
 import gc
-#import urequests
+import urequests
 import ujson as json
 import ntptime
 
 from micropython import const
 from umqtt.simple import MQTTClient
 import network
-import rp2 
 
 import my_secrets
 import RingBuffer
 import urandom
 
-
-shutdown_request = False
-
+import micropython
 
 
 @micropython.native
@@ -91,7 +88,7 @@ def init_RTC():
             break
         except OSError as e:
             print(f"NTP time setting failed. Check network connection. {e}")
-        except Error as e:
+        except Exception as e:
             print(f"unexpected error: {e}")
         time.sleep(wait_time)
         wait_time = wait_time * 2
@@ -107,7 +104,7 @@ def init_RTC():
             rtc.datetime((year, month, day, 0, hour, minute, second, 0))
             success = True
             print("RTC set to: ", rtc.datetime())
-        except Error as e:
+        except Exception as e:
             print(f"Failed to set RTC time: {e}")
     
     if not success:
@@ -286,11 +283,8 @@ def safe_publish(topic, msg):
         return True
     except Exception as e:
         print("Publish failed, will reconnect:", e)
-        try:
-            # drop old client and try reconnect
-            mqtt_client = None
-        except:
-            pass
+        # drop old client and try reconnect
+        mqtt_client = None
         ensure_mqtt_connected()
         return False
 
@@ -303,7 +297,7 @@ def mqtt_message_callback(topic, msg):
             print("Duplicate control message ignored")
             return
     except Exception:
-        pass
+        pass # ignore comparison errors
     # remember this payload
     last_control_msg = msg
 
@@ -381,10 +375,7 @@ async def mqtt_check_loop():
         except OSError as e:
             print("MQTT check_msg error:", e)
             # force reconnection on socket errors
-            try:
-                mqtt_client = None
-            except:
-                pass
+            mqtt_client = None
             ensure_mqtt_connected()
         except Exception as e:
             print("MQTT check_msg generic error:", e)
@@ -444,6 +435,7 @@ async def main():
         coincidence_pin = Pin(14, Pin.OUT)
     print("is_leader is ", is_leader)
 
+    global f
     f = init_file(baseline, rms, threshold, reset_threshold, now, is_leader)
 
     start_time_sec = time.time() # used for calculating runtime
@@ -453,10 +445,10 @@ async def main():
     end_time = start_time
     iteration_count = 0
     muon_count = 0
-    waited = 0
     wait_counts = 0
     waited = 0
     dt = 0.
+    global run_start_time
     run_start_time = start_time
     tlast = start_time
     temperature_adc_value = 0
@@ -472,6 +464,7 @@ async def main():
     last_yield = loop_timer_time
 
     # MQTT setup
+    global mqtt_client
     mqtt_client = mqtt_connect()
     # Start MQTT check loop (uses global mqtt_client)
     asyncio.create_task(mqtt_check_loop())
@@ -594,16 +587,16 @@ except KeyboardInterrupt:
     print("keyboard interrupt")
     try:
         f.close()
-    except:
-        pass
+    except Exception:
+        pass # ignore errors on file close
     unmount_sdcard()
     print("done")
 except Exception as e:
     sys.print_exception(e)
     try:
         f.close()
-    except:
-        pass
+    except Exception:
+        pass # ignore errors on file close
     unmount_sdcard()
     print("done")
 

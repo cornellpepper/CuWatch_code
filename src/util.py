@@ -1,13 +1,16 @@
 #! /usr/bin/env python
 
-# Path to the SD card directory where CSV files are located
-SD_DIRECTORY = '/sd'
 import machine
 import sdcard
 import os
 import time
 import ntptime
 import urequests
+import io
+import urandom
+
+# Path to the SD card directory where CSV files are located
+SD_DIRECTORY = '/sd'
 
 def init_sdcard():
     """ Initialize the SD card interface on the base board"""
@@ -32,7 +35,7 @@ def unmount_sdcard():
     os.umount(SD_DIRECTORY)
     print("SD card unmounted.")
 
-def init_RTC():
+def init_RTC(led2: machine.Pin) -> str:
     """set RTC to UTC. Uses NTP and falls back to worldtimeapi.org if NTP fails"""
     ntptime.host = 'ntp3.cornell.edu'
     ntptime.timeout = 2
@@ -51,7 +54,7 @@ def init_RTC():
             break
         except OSError as e:
             print(f"NTP time setting failed. Check network connection. {e}")
-        except Error as e:
+        except Exception as e:
             print(f"unexpected error: {e}")
         time.sleep(wait_time)
         wait_time = wait_time * 2
@@ -67,15 +70,15 @@ def init_RTC():
             rtc.datetime((year, month, day, 0, hour, minute, second, 0))
             success = True
             print("RTC set to: ", rtc.datetime())
-        except Error as e:
+        except Exception as e:
             print(f"Failed to set RTC time: {e}")
     
     if not success:
         print("Failed to set RTC time")
         random_hour = urandom.getrandbits(5) % 24  # Generate a random hour (0-23)
         random_minute = urandom.getrandbits(6) % 60  # Generate a random minute (0-59)
-        # Set RTC to a random time on 1/1/2020
-        rtc.datetime((2020, 1, 1, 0, random_hour, random_minute, 0, 0))
+        # Set RTC to a random time on 1/1/2024
+        rtc.datetime((2024, 1, 1, 0, random_hour, random_minute, 0, 0))
     return get_iso8601_timestamp()
 
 
