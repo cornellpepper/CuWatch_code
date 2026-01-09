@@ -4,7 +4,7 @@ Code for the CuWatch PCB. The code is in MicroPython. Target is the Raspberry Pi
 
 ## development instructions
 
-Install micropython on the pico-w in the usual way (see [micropython documentation](https://docs.micropython.org/en/latest/rp2/tutorial/intro.html#rp2-intro).) Currently you can download the uf2 file for the pico-w [from this web page](https://micropython.org/download/RPI_PICO_W/). As of 11/4/2026 we are using version 1.26. To upload micropython on a Pico-W that is sitting on a Pepper baseboard, connect the Pico-w to your computer using a micro-USB cable. Hold down the reset button on the base board and the white button on the pico simultaneously. Release the reset button. The Pico-W will show up as a disk on your computer. Drag the uf2 file to that disk. The pico-w will reboot and disconnect from the computer.
+Install micropython on the pico-w in the usual way (see [micropython documentation](https://docs.micropython.org/en/latest/rp2/tutorial/intro.html#rp2-intro).) Currently you can download the uf2 file for the pico-w [from this web page](https://micropython.org/download/RPI_PICO_W/). As of 11/4/2025 we are using version 1.26. To upload micropython on a Pico-W that is sitting on a Pepper baseboard, connect the Pico-w to your computer using a micro-USB cable. Hold down the reset button on the base board and the white button on the pico simultaneously. Release the reset button. The Pico-W will show up as a disk on your computer. Drag the uf2 file to that disk. The pico-w will reboot and disconnect from the computer.
 
 ## local development environment
 
@@ -28,7 +28,7 @@ To be able to log onto the Pico-W web server, its MAC address must be registered
 mpremote findmac.py
 ```
 
-PhysIT will assign an IP address of the form v2cupepperXX.physics to the Pico-W, where XX identifies the particular Pico-W in question. Add the MAC address and corresponding number [to the table here](https://github.com/cornellpepper/CuWatch_code/blob/main/src/macs.md).
+PhysIT will assign a (non-static) IP address to the Pico-W. Add the MAC address and corresponding number [to the table here](https://github.com/cornellpepper/CuWatch_code/blob/main/src/macs.md).
 
 ### Load the latest firmware onto the board
 
@@ -50,10 +50,10 @@ There is a shell script that should do what you want. See [the script here](http
 Run as follows
 
 ```sh
-sh ./install.sh
+sh ./install_mqtt.sh XX
 ```
+where XX is the number assigned to the PICO-W. This will allow students to know which board they are using.
 
-#### If you are using Windows
+## Web page 
 
-There is a powershell script that is the equivalent. Needs testing.
-Question: does the shell script work with WSL in Windows?
+At Cornell the device can be accessed via http://pepper.physics.cornell.edu (must be on-campus to see this board.)
