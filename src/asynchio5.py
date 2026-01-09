@@ -304,8 +304,8 @@ def mqtt_message_callback(topic, msg):
     def make_leader():
         global is_leader
         secondary_marker = "is_secondary"
-        if secondary_marker in os.listdir(''):
-            os.remove(secondary_marker)
+        if secondary_marker in os.listdir('/sd'):
+            os.remove(f"/sd/{secondary_marker}")
             print(f"Removed {secondary_marker}")
         else:
             print(f"{secondary_marker} does not exist")
@@ -314,10 +314,10 @@ def mqtt_message_callback(topic, msg):
     def make_follower():
         global is_leader
         secondary_marker = "is_secondary"
-        if secondary_marker in os.listdir(''):
+        if secondary_marker in os.listdir('/sd'):
             print(f"{secondary_marker} already exists")
         else:
-            with open(secondary_marker, "w") as f:
+            with open(f"/sd/{secondary_marker}", "w") as f:
                 f.write("This node is a follower")
             print(f"Created {secondary_marker}")
         is_leader = False
@@ -476,7 +476,9 @@ async def main():
             'threshold': threshold,
             'reset_threshold': reset_threshold,
             'baseline': baseline,
-            'runtime': time.time() - start_time_sec
+            'runtime': time.time() - start_time_sec,
+            'is_leader': is_leader,
+            'avg_time_ms': avg_time,
         })
 
     status_task_started = False
@@ -545,7 +547,7 @@ async def main():
                 'muon_count': muon_count,
                 'adc_v': adc_value,
                 'temp_adc_v': temperature_adc_value,
-                #'dt': dt,                 # milliseconds between this and previous hit
+                'dt': dt,                 # milliseconds between this and previous hit
                 'ts': get_iso8601_timestamp(),  # ISO-8601 UTC wall-clock time (Z)
                 't_ms': end_time,         # monotonic ticks_ms for debugging
                 'wait_cnt': wait_counts,
@@ -558,7 +560,20 @@ async def main():
                 event_data['run_start'] = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(
                     lt[0], lt[1], lt[2], lt[3], lt[4], lt[5]
                 )
+                # Include run metadata for server-side tracking
+                event_data['baseline'] = int(baseline)
+                event_data['reset_threshold'] = int(reset_threshold)
+                event_data['threshold'] = int(threshold)
+                event_data['is_leader'] = is_leader
                 first_event = False
+            # if first_event:
+            #     print("sent first event string")
+            #     # Add localtime as ISO8601 string
+            #     lt = time.localtime()
+            #     event_data['run_start'] = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(
+            #         lt[0], lt[1], lt[2], lt[3], lt[4], lt[5]
+            #     )
+            #     first_event = False
             try:
                 event_msg = json.dumps(event_data)
                 safe_publish(MQTT_TOPIC, event_msg)
