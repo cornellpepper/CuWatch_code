@@ -14,12 +14,11 @@ import urequests
 import ujson as json
 import ntptime
 
+import micropython
 from micropython import const
 from microdot import Microdot, Response
 import network
-import rp2 
 
-import my_secrets
 import RingBuffer
 import urandom
 
@@ -121,7 +120,7 @@ def init_RTC():
             break
         except OSError as e:
             print(f"NTP time setting failed. Check network connection. {e}")
-        except Error as e:
+        except Exception as e:
             print(f"unexpected error: {e}")
         time.sleep(wait_time)
         wait_time = wait_time * 2
@@ -137,7 +136,7 @@ def init_RTC():
             rtc.datetime((year, month, day, 0, hour, minute, second, 0))
             success = True
             print("RTC set to: ", rtc.datetime())
-        except Error as e:
+        except Exception as e:
             print(f"Failed to set RTC time: {e}")
     
     if not success:
@@ -773,6 +772,7 @@ rates = RingBuffer.RingBuffer(120,'f')
 start_time_sec = 0
 last_req_ms = 0
 baseline = 0
+f = None  # File handle for data logging
 ##################################################################
 
 ##################################################################
@@ -832,7 +832,7 @@ async def server_monitor():
 async def main():
     global muon_count, iteration_count, rate, waited, switch_pressed, avg_time
     global rates, threshold, reset_threshold, is_leader, start_time_sec, baseline
-    global server_task
+    global server_task, f
     server_task = asyncio.create_task(app.start_server(host='0.0.0.0', port=80, debug=False))
     mon_task = asyncio.create_task(server_monitor())
     try:
@@ -1006,7 +1006,7 @@ except KeyboardInterrupt:
     print("keyboard interrupt")
     try:
         f.close()
-    except:
+    except Exception:
         pass
     unmount_sdcard()
     print("done")
@@ -1014,7 +1014,7 @@ except Exception as e:
     sys.print_exception(e)
     try:
         f.close()
-    except:
+    except Exception:
         pass
     unmount_sdcard()
     print("done")
