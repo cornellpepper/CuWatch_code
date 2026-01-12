@@ -100,13 +100,16 @@ def init_RTC():
             data = response.json()
             datetime_str = data['utc_datetime']
             print("datetime_str: ", datetime_str)
-            year, month, day, hour, minute, second = map(int, datetime_str.split('T')[0].split('-') + datetime_str.split('T')[1].split(':'))
+            year, month, day, hour, minute, second = map(int,
+                                                         [datetime_str[0:4], datetime_str[5:7],
+                                                          datetime_str[8:10], datetime_str[11:13],
+                                                          datetime_str[14:16], datetime_str[17:19]])
             rtc.datetime((year, month, day, 0, hour, minute, second, 0))
             success = True
             print("RTC set to: ", rtc.datetime())
         except Exception as e:
             print(f"Failed to set RTC time: {e}")
-    
+
     if not success:
         print("Failed to set RTC time")
         random_hour = urandom.getrandbits(5) % 24  # Generate a random hour (0-23)
@@ -322,6 +325,7 @@ def mqtt_message_callback(topic, msg):
             print(f"Created {secondary_marker}")
         is_leader = False
 
+    # we presume that the inputs were sanity-checked by the sender
     print("Received MQTT message on topic:", topic)
     print("Expected control topic:", MQTT_CONTROL_TOPIC)
     if topic == MQTT_CONTROL_TOPIC:
@@ -332,6 +336,10 @@ def mqtt_message_callback(topic, msg):
             if "threshold" in data:
                 threshold = int(data["threshold"])
                 print(f"Threshold updated via MQTT: {threshold}")
+            if "reset_threshold" in data:
+                global reset_threshold
+                reset_threshold = int(data["reset_threshold"])
+                print(f"Reset threshold updated via MQTT: {reset_threshold}")
             # Accept either {"new_run": true}, {"shutdown": true} or legacy string payloads
             if (isinstance(data, dict) and data.get("new_run")) or (isinstance(data, str) and data == "new_run"):
                 print("Received new_run command via MQTT")
@@ -566,14 +574,6 @@ async def main():
                 event_data['threshold'] = int(threshold)
                 event_data['is_leader'] = is_leader
                 first_event = False
-            # if first_event:
-            #     print("sent first event string")
-            #     # Add localtime as ISO8601 string
-            #     lt = time.localtime()
-            #     event_data['run_start'] = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(
-            #         lt[0], lt[1], lt[2], lt[3], lt[4], lt[5]
-            #     )
-            #     first_event = False
             try:
                 event_msg = json.dumps(event_data)
                 safe_publish(MQTT_TOPIC, event_msg)
@@ -593,7 +593,8 @@ async def main():
             print("tight loop shutdown, waited is ", waited)
             break
     f.close()
-
+    hv_power_enable.off()
+    print("exiting main loop")
 
 # Run the main loop
 try:
@@ -604,16 +605,15 @@ except KeyboardInterrupt:
         f.close()
     except Exception:
         pass # ignore errors on file close
-    unmount_sdcard()
-    print("done")
 except Exception as e:
     sys.print_exception(e)
     try:
         f.close()
     except Exception:
         pass # ignore errors on file close
-    unmount_sdcard()
-    print("done")
+unmount_sdcard()
+print("done -- run ending")
 
 if restart_request:
+    print("machine restarting")
     machine.reset()
