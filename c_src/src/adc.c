@@ -23,14 +23,21 @@ void adc_calibrate(uint32_t n, float *baseline, float *rms)
   double sumval = 0.0;
   double sum_sq = 0.0;
 
+  adc_select_input(ADC_CHANNEL_SIPM);
+  // discard first sample
+  (void)adc_read();
+  // sleep 2 us
+  busy_wait_us_32(2);
+
+  // calibration loop
   for (uint32_t i = 0; i < n; i++) {
-    adc_select_input(ADC_CHANNEL_SIPM);
     uint16_t val = adc_read() << 4; /* Scale 12-bit→16-bit to match read_u16() */
     sumval += val;
     sum_sq += (double)val * val;
 
+    sleep_ms(5);
     gpio_xor_mask(1u << PIN_LED2); /* Toggle LED2 */
-    sleep_ms(10);
+    sleep_ms(5);
   }
 
   double mean = sumval / n;
@@ -111,6 +118,10 @@ void adc_detection_loop(queue_t *evt_q, queue_t *cmd_q, run_config_t *cfg)
     /* Read SiPM ADC — synchronous single conversion.
      * Scale 12-bit result to 16-bit (<<4) to match MicroPython read_u16(). */
     adc_select_input(ADC_CHANNEL_SIPM);
+    // discard first sample
+    (void)adc_read();
+    // sleep 2 us
+    busy_wait_us_32(2);
     uint16_t adc_val = adc_read() << 4;
 
     if ((int32_t)adc_val > threshold) {
@@ -136,6 +147,8 @@ void adc_detection_loop(queue_t *evt_q, queue_t *cmd_q, run_config_t *cfg)
        * Max WAIT_COUNT_INIT iterations (~150 µs with 1 µs waits).
        * Also latch coincidence pin during this window (leader only). */
       adc_select_input(ADC_CHANNEL_SIPM);
+      // short delay after select
+      busy_wait_us_32(2);
       while ((adc_read() << 4) > (uint16_t)reset_threshold) {
         if (is_leader && coincidence == 0) {
           coincidence = gpio_get(PIN_COINCIDENCE) ? 1 : 0;
@@ -149,6 +162,10 @@ void adc_detection_loop(queue_t *evt_q, queue_t *cmd_q, run_config_t *cfg)
 
       /* Sample temperature after the muon pulse has settled */
       adc_select_input(ADC_CHANNEL_TEMP);
+      // discard first sample
+      (void)adc_read();
+      // sleep 1 us
+      busy_wait_us_32(1);
       uint16_t temp_val = adc_read() << 4;
 
       gpio_put(PIN_LED2, 0);

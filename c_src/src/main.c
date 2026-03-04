@@ -106,7 +106,7 @@ static void init_gpio_pins(void)
   /* HV power supply enable — active HIGH */
   gpio_init(PIN_HV_ENABLE);
   gpio_set_dir(PIN_HV_ENABLE, GPIO_OUT);
-  gpio_put(PIN_HV_ENABLE, 1); /* Off initially; enabled after calibration */
+  gpio_put(PIN_HV_ENABLE, 0); /* Off initially; enabled after calibration */
 
   /* User switch — pull-down, trigger on rising edge */
   gpio_init(PIN_USER_SWITCH);
