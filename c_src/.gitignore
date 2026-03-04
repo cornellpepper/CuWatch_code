@@ -1,0 +1,5 @@
+# cmake out-of-source build directory
+build/
+
+# WiFi and MQTT credentials — NEVER commit this file
+my_secrets.h

@@ -16,6 +16,11 @@ downloads/
 eggs/
 .eggs/
 lib/
+
+# C source: override lib/ and build/ patterns for c_src submodules
+!c_src/lib/
+c_src/build/
+c_src/my_secrets.h
 lib64/
 parts/
 sdist/
