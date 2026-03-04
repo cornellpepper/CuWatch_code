@@ -67,6 +67,7 @@ target_link_libraries(cuwatch
     hardware_adc                           # ADC sampling
     hardware_gpio                          # GPIO init/IRQ
     hardware_flash                         # Required by Mongoose OTA (pico OTA)
+    hardware_watchdog                      # watchdog_reboot() for new_run reset
     pico_cyw43_arch_lwip_sys_freertos      # WiFi + lwIP with FreeRTOS
     FreeRTOS-Kernel                        # FreeRTOS core
     FreeRTOS-Kernel-Heap4                  # FreeRTOS heap4 allocator

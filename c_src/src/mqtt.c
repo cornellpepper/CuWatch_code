@@ -9,6 +9,7 @@
 #include "pico/stdlib.h"
 #include "pico/time.h"
 #include "pico/util/queue.h"
+#include "hardware/watchdog.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -31,6 +32,11 @@ static bool s_sntp_synced = false;
  * The main loop calls mg_ota_end() (with Core 1 locked out) once Mongoose
  * has had a few poll cycles to flush the response to the client. */
 static bool s_ota_finalize = false;
+
+/* New-run reboot flag: set when CMD_NEW_RUN is received via MQTT.
+ * Triggers a watchdog reboot after flushing the SD card, matching
+ * the Python implementation's machine.reset() behaviour. */
+static bool s_new_run_reboot = false;
 
 /* Pointers to shared state — set from io_task_params_t in mqtt_io_task() */
 static queue_t *s_evt_q = NULL;
@@ -105,14 +111,23 @@ static int build_telemetry_json(char *buf, size_t buf_size,
                    (unsigned)ev->coincidence);
 
   if (s_first_event && n < (int)buf_size - 1) {
-    /* Append first-event run metadata */
+    /* Append first-event run metadata.
+     * s_run_start_ts is set in try_init_csv() once NTP has synced; if the
+     * first event fires before NTP sync (MQTT connected first), fall back to
+     * get_iso8601_timestamp() so the field is never an empty string. */
+    char run_start[32];
+    if (s_run_start_ts[0] != '\0') {
+      memcpy(run_start, s_run_start_ts, sizeof(run_start));
+    } else {
+      get_iso8601_timestamp(run_start, sizeof(run_start));
+    }
     n += snprintf(buf + n, buf_size - (size_t)n,
                   ",\"run_start\":\"%s\","
                   "\"baseline\":%d,"
                   "\"reset_threshold\":%d,"
                   "\"threshold\":%d,"
                   "\"is_leader\":%s",
-                  s_run_start_ts,
+                  run_start,
                   (int)s_cfg->baseline,
                   (int)s_cfg->reset_threshold,
                   (int)s_cfg->threshold,
@@ -174,9 +189,10 @@ static void handle_control_message(const char *data, size_t len)
   /* Parse new_run */
   bool new_run_val = false;
   if (mg_json_get_bool(mg_str_n(data, len), "$.new_run", &new_run_val) && new_run_val) {
-    printf("Received new_run via MQTT\n");
+    printf("Received new_run via MQTT — will reboot after SD flush\n");
     control_cmd_t cmd = {.type = CMD_NEW_RUN, .value = 0};
     queue_try_add(s_cmd_q, &cmd);
+    s_new_run_reboot = true; /* Signal main loop to reboot (matches Python machine.reset()) */
   }
 
   /* Parse shutdown */
@@ -591,6 +607,9 @@ void mqtt_io_task(void *params)
     muon_event_t event;
     while (queue_try_remove(s_evt_q, &event)) {
       s_stats->muon_count++;
+      if (event.wait_counts == 0) {
+        s_stats->waited_count++; /* Dead-time counter hit zero before signal dropped */
+      }
 
       /* Update inter-event time ring buffer and rate */
       rb_push(s_dts, (float)event.dt_ms);
@@ -629,6 +648,22 @@ void mqtt_io_task(void *params)
         (now_ms - s_stats->start_time_ms > 30000)) {
       printf("NTP not synced after 30 s — creating CSV with epoch 0\n");
       try_init_csv(true); /* force=true: skip NTP check */
+    }
+
+    /* New-run reboot: CMD_NEW_RUN was received via MQTT.  Flush and close SD,
+     * then reboot via watchdog — equivalent to Python's machine.reset().
+     * Give Core 1 a moment to drain its current event (it will stop on its
+     * own after receiving CMD_NEW_RUN), then reboot cleanly. */
+    if (s_new_run_reboot) {
+      printf("new_run: flushing SD and rebooting...\n");
+      sdcard_flush();
+      sdcard_unmount();
+      mg_mgr_free(&mgr);
+      cyw43_arch_deinit();
+      watchdog_reboot(0, 0, 100); /* 100 ms delay then reset */
+      while (true) {
+        tight_loop_contents();
+      }
     }
   }
 
